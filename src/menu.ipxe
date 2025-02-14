@@ -13,12 +13,13 @@ cpuid --ext 29 && set archl amd64 || set archl i386
 :start
 menu iPXE Boot Menu
 item --gap --            ------------------------- Recovery Tools ----------------------------------
+item --key k clonezilla  Clonezilla Live
 item --key s synomedia   Synology Recovery Media
 item --key m macrium     Macrium Recovery Media
-item --key k clonezilla  Clonezilla Live
 item --key r rescuezilla Rescuezilla
 item --key p minitool    MiniTool Partition Wizard
 item --key 1 sysresccd   System Rescue CD
+item --key 2 strelec10   Sergei Strelec WinPE 10
 item --key e easyuefi    EasyUEFI Enterprise
 item --gap --            ------------------------- Netboot (UEFI) ----------------------------------
 item --key n netboot     netboot.xyz
@@ -92,6 +93,14 @@ kernel ${base-url}/wimboot
 initrd ${base-url}/boot/bcd         BCD
 initrd ${base-url}/boot/boot.sdi    boot.sdi
 initrd ${base-url}/sources/boot.wim boot.wim
+boot || goto failed
+
+:strelec10
+set base-url http://192.168.1.1/strelec
+kernel ${base-url}/wimboot
+initrd ${base-url}/bcd         BCD
+initrd ${base-url}/boot.sdi    boot.sdi
+initrd ${base-url}/strelec10x64Eng.wim    strelec10x64Eng.wim
 boot || goto failed
 
 :easyuefi
