@@ -641,38 +641,6 @@ static void efipci_dma_free ( struct dma_device *dma, struct dma_mapping *map,
 }
 
 /**
- * Allocate and map DMA-coherent buffer from external (user) memory
- *
- * @v dma		DMA device
- * @v map		DMA mapping to fill in
- * @v len		Length of buffer
- * @v align		Physical alignment
- * @ret addr		Buffer address, or NULL on error
- */
-static userptr_t efipci_dma_umalloc ( struct dma_device *dma,
-				      struct dma_mapping *map,
-				      size_t len, size_t align ) {
-	void *addr;
-
-	addr = efipci_dma_alloc ( dma, map, len, align );
-	return virt_to_user ( addr );
-}
-
-/**
- * Unmap and free DMA-coherent buffer from external (user) memory
- *
- * @v dma		DMA device
- * @v map		DMA mapping
- * @v addr		Buffer address
- * @v len		Length of buffer
- */
-static void efipci_dma_ufree ( struct dma_device *dma, struct dma_mapping *map,
-			       userptr_t addr, size_t len ) {
-
-	efipci_dma_free ( dma, map, user_to_virt ( addr, 0 ), len );
-}
-
-/**
  * Set addressable space mask
  *
  * @v dma		DMA device
@@ -710,8 +678,8 @@ static struct dma_operations efipci_dma_operations = {
 	.unmap = efipci_dma_unmap,
 	.alloc = efipci_dma_alloc,
 	.free = efipci_dma_free,
-	.umalloc = efipci_dma_umalloc,
-	.ufree = efipci_dma_ufree,
+	.umalloc = efipci_dma_alloc,
+	.ufree = efipci_dma_free,
 	.set_mask = efipci_dma_set_mask,
 };
 
@@ -830,6 +798,26 @@ static int efipci_supported ( EFI_HANDLE device ) {
 }
 
 /**
+ * Exclude existing drivers
+ *
+ * @v device		EFI device handle
+ * @ret rc		Return status code
+ */
+static int efipci_exclude ( EFI_HANDLE device ) {
+	EFI_GUID *protocol = &efi_pci_io_protocol_guid;
+	int rc;
+
+	/* Exclude existing PCI I/O protocol drivers */
+	if ( ( rc = efi_driver_exclude ( device, protocol ) ) != 0 ) {
+		DBGC ( device, "EFIPCI %s could not exclude drivers: %s\n",
+		       efi_handle_name ( device ), strerror ( rc ) );
+		return rc;
+	}
+
+	return 0;
+}
+
+/**
  * Attach driver to device
  *
  * @v efidev		EFI device
@@ -916,8 +904,8 @@ static void efipci_stop ( struct efi_device *efidev ) {
 /** EFI PCI driver */
 struct efi_driver efipci_driver __efi_driver ( EFI_DRIVER_HARDWARE ) = {
 	.name = "PCI",
-	.exclude = &efi_pci_io_protocol_guid,
 	.supported = efipci_supported,
+	.exclude = efipci_exclude,
 	.start = efipci_start,
 	.stop = efipci_stop,
 };

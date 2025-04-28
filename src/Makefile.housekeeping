@@ -368,6 +368,15 @@ WNAPM_FLAGS := $(shell $(WNAPM_TEST) && \
 WORKAROUND_CFLAGS += $(WNAPM_FLAGS)
 endif
 
+# gcc 15 generates warnings for fixed-length character array
+# initializers that lack a terminating NUL.  Inhibit the warnings.
+#
+WNUSI_TEST = $(CC) -Wunterminated-string-initialization -x c -c /dev/null \
+		   -o /dev/null >/dev/null 2>&1
+WNUSI_FLAGS := $(shell $(WNUSI_TEST) && \
+		 $(ECHO) '-Wno-unterminated-string-initialization')
+WORKAROUND_CFLAGS += $(WNUSI_FLAGS)
+
 # Some versions of gas choke on division operators, treating them as
 # comment markers.  Specifying --divide will work around this problem,
 # but isn't available on older gas versions.
@@ -606,7 +615,7 @@ embedded_DEPS += $(EMBEDDED_FILES) $(EMBEDDED_LIST)
 
 CFLAGS_embedded = -DEMBED_ALL="$(EMBED_ALL)"
 
-# List of trusted root certificates
+# List of trusted root certificate configuration
 #
 TRUSTED_LIST	:= $(BIN)/.trusted.list
 ifeq ($(wildcard $(TRUSTED_LIST)),)
@@ -614,8 +623,9 @@ TRUST_OLD := <invalid>
 else
 TRUST_OLD := $(shell cat $(TRUSTED_LIST))
 endif
-ifneq ($(TRUST_OLD),$(TRUST))
-$(shell $(ECHO) "$(TRUST)" > $(TRUSTED_LIST))
+TRUST_CFG := $(TRUST) $(TRUST_EXT)
+ifneq ($(TRUST_OLD),$(TRUST_CFG))
+$(shell $(ECHO) "$(TRUST_CFG)" > $(TRUSTED_LIST))
 endif
 
 $(TRUSTED_LIST) : $(MAKEDEPS)
@@ -632,7 +642,8 @@ TRUSTED_FPS	:= $(foreach CERT,$(TRUSTED_CERTS),\
 
 rootcert_DEPS += $(TRUSTED_FILES) $(TRUSTED_LIST)
 
-CFLAGS_rootcert = $(if $(TRUSTED_FPS),-DTRUSTED="$(TRUSTED_FPS)")
+CFLAGS_rootcert += $(if $(TRUST_EXT),-DALLOW_TRUST_OVERRIDE=$(TRUST_EXT))
+CFLAGS_rootcert += $(if $(TRUSTED_FPS),-DTRUSTED="$(TRUSTED_FPS)")
 
 # List of embedded certificates
 #
