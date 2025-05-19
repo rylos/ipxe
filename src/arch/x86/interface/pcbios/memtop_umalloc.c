@@ -31,11 +31,11 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
  */
 
 #include <limits.h>
+#include <string.h>
 #include <errno.h>
 #include <ipxe/uaccess.h>
-#include <ipxe/hidemem.h>
-#include <ipxe/io.h>
 #include <ipxe/memblock.h>
+#include <ipxe/memmap.h>
 #include <ipxe/umalloc.h>
 
 /** Maximum usable address for external allocated memory */
@@ -61,6 +61,22 @@ static void *bottom = NULL;
 /** Remaining space on heap */
 static size_t heap_size;
 
+/** In-use memory region */
+struct used_region umalloc_used __used_region = {
+	.name = "umalloc",
+};
+
+/**
+ * Hide umalloc() region
+ *
+ * @v start		Start of region
+ * @v end		End of region
+ */
+static void hide_umalloc ( physaddr_t start, physaddr_t end ) {
+
+	memmap_use ( &umalloc_used, start, ( end - start ) );
+}
+
 /**
  * Find largest usable memory region
  *
@@ -68,35 +84,34 @@ static size_t heap_size;
  * @ret len		Length of region
  */
 size_t largest_memblock ( void **start ) {
-	struct memory_map memmap;
-	struct memory_region *region;
+	struct memmap_region region;
 	physaddr_t max = EM_MAX_ADDRESS;
 	physaddr_t region_start;
 	physaddr_t region_end;
 	size_t region_len;
-	unsigned int i;
 	size_t len = 0;
 
 	/* Avoid returning uninitialised data on error */
 	*start = NULL;
 
 	/* Scan through all memory regions */
-	get_memmap ( &memmap );
-	for ( i = 0 ; i < memmap.count ; i++ ) {
-		region = &memmap.regions[i];
-		DBG ( "Considering [%llx,%llx)\n", region->start, region->end );
+	for_each_memmap ( &region, 1 ) {
 
 		/* Truncate block to maximum physical address */
-		if ( region->start > max ) {
-			DBG ( "...starts after maximum address %lx\n", max );
-			continue;
+		memmap_dump ( &region );
+		if ( region.addr > max ) {
+			DBGC ( &region, "...starts after maximum address "
+			       "%lx\n", max );
+			break;
 		}
-		region_start = region->start;
-		if ( region->end > max ) {
-			DBG ( "...end truncated to maximum address %lx\n", max);
+		region_start = region.addr;
+		if ( ! memmap_is_usable ( &region ) )
+			continue;
+		region_end = ( region_start + memmap_size ( &region ) );
+		if ( region_end > max ) {
+			DBGC ( &region, "...end truncated to maximum address "
+			       "%lx\n", max);
 			region_end = 0; /* =max, given the wraparound */
-		} else {
-			region_end = region->end;
 		}
 		region_len = ( region_end - region_start );
 
