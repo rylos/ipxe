@@ -181,7 +181,7 @@ static int fdt_next ( struct fdt *fdt, struct fdt_descriptor *desc ) {
  * @ret rc		Return status code
  */
 static int fdt_enter ( struct fdt *fdt, unsigned int offset,
-		struct fdt_descriptor *desc ) {
+		       struct fdt_descriptor *desc ) {
 	int rc;
 
 	/* Find begin node token */
@@ -210,6 +210,100 @@ static int fdt_enter ( struct fdt *fdt, unsigned int offset,
 			return -EINVAL;
 		}
 	}
+}
+
+/**
+ * Find node relative depth
+ *
+ * @v fdt		Device tree
+ * @v offset		Starting node offset
+ * @v target		Target node offset
+ * @ret depth		Depth, or negative error
+ */
+static int fdt_depth ( struct fdt *fdt, unsigned int offset,
+		       unsigned int target ) {
+	struct fdt_descriptor desc;
+	int depth;
+	int rc;
+
+	/* Enter node */
+	if ( ( rc = fdt_enter ( fdt, offset, &desc ) ) != 0 )
+		return rc;
+
+	/* Find target node */
+	for ( depth = 0 ; depth >= 0 ; depth += desc.depth ) {
+
+		/* Describe token */
+		if ( ( rc = fdt_next ( fdt, &desc ) ) != 0 ) {
+			DBGC ( fdt, "FDT +%#04x has malformed node: %s\n",
+			       offset, strerror ( rc ) );
+			return rc;
+		}
+
+		/* Check for target node */
+		if ( desc.offset == target ) {
+			DBGC2 ( fdt, "FDT +%#04x has descendant node +%#04x "
+				"at depth +%d\n", offset, target, depth );
+			return depth;
+		}
+	}
+
+	DBGC ( fdt, "FDT +#%04x has no descendant node +%#04x\n",
+	       offset, target );
+	return -ENOENT;
+}
+
+/**
+ * Find parent node
+ *
+ * @v fdt		Device tree
+ * @v offset		Starting node offset
+ * @v parent		Parent node offset to fill in
+ * @ret rc		Return status code
+ */
+int fdt_parent ( struct fdt *fdt, unsigned int offset, unsigned int *parent ) {
+	struct fdt_descriptor desc;
+	int pdepth;
+	int depth;
+	int rc;
+
+	/* Find depth from root of tree */
+	depth = fdt_depth ( fdt, 0, offset );
+	if ( depth < 0 ) {
+		rc = depth;
+		return rc;
+	}
+	pdepth = ( depth - 1 );
+
+	/* Enter root node */
+	if ( ( rc = fdt_enter ( fdt, 0, &desc ) ) != 0 )
+		return rc;
+	*parent = desc.offset;
+
+	/* Find parent node */
+	for ( depth = 0 ; depth >= 0 ; depth += desc.depth ) {
+
+		/* Describe token */
+		if ( ( rc = fdt_next ( fdt, &desc ) ) != 0 ) {
+			DBGC ( fdt, "FDT +%#04x has malformed node: %s\n",
+			       offset, strerror ( rc ) );
+			return rc;
+		}
+
+		/* Record possible parent node */
+		if ( ( depth == pdepth ) && desc.name && ( ! desc.data ) )
+			*parent = desc.offset;
+
+		/* Check for target node */
+		if ( desc.offset == offset ) {
+			DBGC2 ( fdt, "FDT +%#04x has parent node at +%#04x\n",
+				offset, *parent );
+			return 0;
+		}
+	}
+
+	DBGC ( fdt, "FDT +#%04x has no parent node\n", offset );
+	return -ENOENT;
 }
 
 /**
@@ -1055,18 +1149,17 @@ static int fdt_ensure_child ( struct fdt *fdt, unsigned int offset,
 }
 
 /**
- * Ensure property exists with specified value
+ * Set property value
  *
  * @v fdt		Device tree
  * @v offset		Starting node offset
  * @v name		Property name
- * @v data		Property data
+ * @v data		Property data, or NULL to delete property
  * @v len		Length of property data
  * @ret rc		Return status code
  */
-static int fdt_ensure_property ( struct fdt *fdt, unsigned int offset,
-				 const char *name, const void *data,
-				 size_t len ) {
+static int fdt_set ( struct fdt *fdt, unsigned int offset, const char *name,
+		     const void *data, size_t len ) {
 	struct fdt_descriptor desc;
 	struct {
 		fdt_token_t token;
@@ -1111,6 +1204,10 @@ static int fdt_ensure_property ( struct fdt *fdt, unsigned int offset,
 		/* Calculate insertion length */
 		insert = ( sizeof ( *hdr ) + len );
 	}
+
+	/* Leave property erased if applicable */
+	if ( ! data )
+		return 0;
 
 	/* Insert space */
 	if ( ( rc = fdt_insert_nop ( fdt, desc.offset, insert ) ) != 0 )
@@ -1166,10 +1263,15 @@ static int fdt_urealloc ( struct fdt *fdt, size_t len ) {
  *
  * @v fdt		Device tree
  * @v cmdline		Command line, or NULL
+ * @v initrd		Initial ramdisk address (or 0 for no initrd)
+ * @v initrd_len	Initial ramdisk length (or 0 for no initrd)
  * @ret rc		Return status code
  */
-static int fdt_bootargs ( struct fdt *fdt, const char *cmdline ) {
+static int fdt_bootargs ( struct fdt *fdt, const char *cmdline,
+			  physaddr_t initrd, size_t initrd_len ) {
 	unsigned int chosen;
+	physaddr_t addr;
+	const void *data;
 	size_t len;
 	int rc;
 
@@ -1177,14 +1279,25 @@ static int fdt_bootargs ( struct fdt *fdt, const char *cmdline ) {
 	if ( ( rc = fdt_ensure_child ( fdt, 0, "chosen", &chosen ) ) != 0 )
 		return rc;
 
-	/* Use empty command line if none specified */
-	if ( ! cmdline )
-		cmdline = "";
+	/* Set or clear "bootargs" property */
+	len = ( cmdline ? ( strlen ( cmdline ) + 1 /* NUL */ ) : 0 );
+	if ( ( rc = fdt_set ( fdt, chosen, "bootargs", cmdline, len ) ) != 0 )
+		return rc;
 
-	/* Ensure "bootargs" property exists */
-	len = ( strlen ( cmdline ) + 1 /* NUL */ );
-	if ( ( rc = fdt_ensure_property ( fdt, chosen, "bootargs", cmdline,
-					  len ) ) != 0 )
+	/* Set or clear initrd properties */
+	data = ( initrd_len ? &addr : NULL );
+	len = ( initrd_len ? sizeof ( addr ) : 0 );
+	addr = initrd;
+	addr = ( ( sizeof ( addr ) == sizeof ( uint64_t ) ) ?
+		 cpu_to_be64 ( addr ) : cpu_to_be32 ( addr ) );
+	if ( ( rc = fdt_set ( fdt, chosen, "linux,initrd-start", data,
+			      len ) ) != 0 )
+		return rc;
+	addr = ( initrd + initrd_len );
+	addr = ( ( sizeof ( addr ) == sizeof ( uint64_t ) ) ?
+		 cpu_to_be64 ( addr ) : cpu_to_be32 ( addr ) );
+	if ( ( rc = fdt_set ( fdt, chosen, "linux,initrd-end", data,
+			      len ) ) != 0 )
 		return rc;
 
 	return 0;
@@ -1195,9 +1308,12 @@ static int fdt_bootargs ( struct fdt *fdt, const char *cmdline ) {
  *
  * @v hdr		Device tree header to fill in (may be set to NULL)
  * @v cmdline		Command line, or NULL
+ * @v initrd		Initial ramdisk address (or 0 for no initrd)
+ * @v initrd_len	Initial ramdisk length (or 0 for no initrd)
  * @ret rc		Return status code
  */
-int fdt_create ( struct fdt_header **hdr, const char *cmdline ) {
+int fdt_create ( struct fdt_header **hdr, const char *cmdline,
+		 physaddr_t initrd, size_t initrd_len ) {
 	struct image *image;
 	struct fdt fdt;
 	void *copy;
@@ -1228,7 +1344,7 @@ int fdt_create ( struct fdt_header **hdr, const char *cmdline ) {
 	fdt.realloc = fdt_urealloc;
 
 	/* Populate boot arguments */
-	if ( ( rc = fdt_bootargs ( &fdt, cmdline ) ) != 0 )
+	if ( ( rc = fdt_bootargs ( &fdt, cmdline, initrd, initrd_len ) ) != 0 )
 		goto err_bootargs;
 
  no_fdt:

@@ -170,6 +170,8 @@ fdt_reservations ( struct fdt *fdt ) {
 
 extern int fdt_describe ( struct fdt *fdt, unsigned int offset,
 			  struct fdt_descriptor *desc );
+extern int fdt_parent ( struct fdt *fdt, unsigned int offset,
+			unsigned int *parent );
 extern int fdt_path ( struct fdt *fdt, const char *path,
 		      unsigned int *offset );
 extern int fdt_alias ( struct fdt *fdt, const char *name,
@@ -199,7 +201,8 @@ extern int fdt_mac ( struct fdt *fdt, unsigned int offset,
 		     struct net_device *netdev );
 extern int fdt_parse ( struct fdt *fdt, struct fdt_header *hdr,
 		       size_t max_len );
-extern int fdt_create ( struct fdt_header **hdr, const char *cmdline );
+extern int fdt_create ( struct fdt_header **hdr, const char *cmdline,
+			physaddr_t initrd, size_t initrd_len );
 extern void fdt_remove ( struct fdt_header *hdr );
 
 #endif /* _IPXE_FDT_H */
