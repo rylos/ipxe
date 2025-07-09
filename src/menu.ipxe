@@ -98,18 +98,24 @@ boot || goto failed
 
 :strelec10
 set base-url http://192.168.1.1/strelec
-kernel ${base-url}/wimboot
-initrd ${base-url}/bcd         BCD
-initrd ${base-url}/boot.sdi    boot.sdi
-initrd ${base-url}/strelec10x64Eng.wim    strelec10x64Eng.wim
+kernel ${base-url}/wimboot || goto failed
+initrd --name network.cmd ${base-url}/network.cmd network.cmd || goto failed
+initrd --name bootx64.efi ${base-url}/bootx64.efi bootx64.efi || goto failed
+initrd --name bootmgr.exe ${base-url}/bootmgr64.exe bootmgr.exe || goto failed
+initrd --name BCD ${base-url}/bcd BCD || goto failed 
+initrd --name boot.sdi ${base-url}/boot.sdi boot.sdi || goto failed
+initrd --name boot.wim ${base-url}/strelec10x64Eng.wim boot.wim || goto failed
 boot || goto failed
 
 :strelec11
 set base-url http://192.168.1.1/strelec
-kernel ${base-url}/wimboot
-initrd ${base-url}/bcd         BCD
-initrd ${base-url}/boot.sdi    boot.sdi
-initrd ${base-url}/strelec11x64Eng.wim    strelec11x64Eng.wim
+kernel ${base-url}/wimboot || goto failed
+initrd --name network.cmd ${base-url}/network.cmd network.cmd || goto failed
+initrd --name bootx64.efi ${base-url}/bootx64.efi bootx64.efi || goto failed
+initrd --name bootmgr.exe ${base-url}/bootmgr64.exe bootmgr.exe || goto failed
+initrd --name BCD ${base-url}/bcd BCD || goto failed 
+initrd --name boot.sdi ${base-url}/boot.sdi boot.sdi || goto failed
+initrd --name boot.wim ${base-url}/strelec11x64Eng.wim boot.wim || goto failed
 boot || goto failed
 
 :easyuefi
@@ -117,6 +123,8 @@ set base-url http://192.168.1.1/easyuefi
 kernel ${base-url}/wimboot
 initrd ${base-url}/boot/bcd         BCD
 initrd ${base-url}/boot/boot.sdi    boot.sdi
+initrd ${base-url}/bootx64.efi bootx64.efi
+initrd ${base-url}/bootmgr     bootmgr
 initrd ${base-url}/sources/boot.wim boot.wim
 boot || goto failed
 
