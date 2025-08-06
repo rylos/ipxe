@@ -187,6 +187,7 @@ extern int fdt_u64 ( struct fdt *fdt, unsigned int offset, const char *name,
 		     uint64_t *value );
 extern int fdt_u32 ( struct fdt *fdt, unsigned int offset, const char *name,
 		     uint32_t *value );
+extern uint32_t fdt_phandle ( struct fdt *fdt, unsigned int offset );
 extern void fdt_reg_cells ( struct fdt *fdt, unsigned int offset,
 			    struct fdt_reg_cells *regs );
 extern int fdt_reg_count ( struct fdt *fdt, unsigned int offset,

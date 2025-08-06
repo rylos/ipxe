@@ -34,6 +34,13 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
  *
  */
 
+/** Minimum alignment for coherent DMA allocations
+ *
+ * We set this sufficiently high to ensure that we do not end up with
+ * both cached and uncached uses in the same cacheline.
+ */
+#define RISCV_DMA_ALIGN 256
+
 /**
  * Map buffer for DMA
  *
@@ -44,22 +51,55 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
  * @v flags		Mapping flags
  * @ret rc		Return status code
  */
-static int riscv_dma_map ( struct dma_device *dma __unused,
-			   struct dma_mapping *map __unused,
+static int riscv_dma_map ( struct dma_device *dma,
+			   struct dma_mapping *map,
 			   void *addr, size_t len, int flags ) {
 
 	/* Sanity check: we cannot support bidirectional mappings */
 	assert ( ! ( ( flags & DMA_TX ) & ( flags & DMA_RX ) ) );
 
+	/* Populate mapping */
+	map->dma = dma;
+	map->offset = 0;
+	map->token = NULL;
+
 	/* Flush cached data to transmit buffers */
 	if ( flags & DMA_TX )
 		cache_clean ( addr, len );
 
-	/* Invalidate cached data in receive buffers */
-	if ( flags & DMA_RX )
+	/* Invalidate cached data in receive buffers and record address */
+	if ( flags & DMA_RX ) {
 		cache_invalidate ( addr, len );
+		map->token = addr;
+	}
+
+	/* Increment mapping count (for debugging) */
+	if ( DBG_LOG )
+		dma->mapped++;
 
 	return 0;
+}
+
+/**
+ * Unmap buffer
+ *
+ * @v map		DMA mapping
+ * @v len		Used length
+ */
+static void riscv_dma_unmap ( struct dma_mapping *map, size_t len ) {
+	struct dma_device *dma = map->dma;
+	void *addr = map->token;
+
+	/* Invalidate cached data in receive buffers */
+	if ( addr )
+		cache_invalidate ( addr, len );
+
+	/* Clear mapping */
+	map->dma = NULL;
+
+	/* Decrement mapping count (for debugging) */
+	if ( DBG_LOG )
+		dma->mapped--;
 }
 
 /**
@@ -78,6 +118,11 @@ static void * riscv_dma_alloc ( struct dma_device *dma,
 	void *addr;
 	void *caddr;
 
+	/* Round up length and alignment */
+	len = ( ( len + RISCV_DMA_ALIGN - 1 ) & ~( RISCV_DMA_ALIGN - 1 ) );
+	if ( align < RISCV_DMA_ALIGN )
+		align = RISCV_DMA_ALIGN;
+
 	/* Allocate from heap */
 	addr = malloc_phys ( len, align );
 	if ( ! addr )
@@ -93,10 +138,14 @@ static void * riscv_dma_alloc ( struct dma_device *dma,
 	/* Calculate coherently-mapped virtual address */
 	phys = virt_to_phys ( addr );
 	assert ( phys == ( ( uint32_t ) phys ) );
-	caddr = ( ( void * ) ( intptr_t ) ( phys + SVPAGE_DMA32 ) );
+	caddr = ( ( void * ) ( intptr_t ) ( phys + svpage_dma32() ) );
 	assert ( phys == virt_to_phys ( caddr ) );
 	DBGC ( dma, "DMA allocated [%#08lx,%#08lx) via %p\n",
 	       phys, ( phys + len ), caddr );
+
+	/* Increment allocation count (for debugging) */
+	if ( DBG_LOG )
+		dma->allocated++;
 
 	return caddr;
 }
@@ -111,9 +160,13 @@ static void * riscv_dma_alloc ( struct dma_device *dma,
  */
 static void riscv_dma_free ( struct dma_mapping *map,
 			     void *addr, size_t len ) {
+	struct dma_device *dma = map->dma;
 
 	/* Sanity check */
 	assert ( virt_to_phys ( addr ) == virt_to_phys ( map->token ) );
+
+	/* Round up length to match allocation */
+	len = ( ( len + RISCV_DMA_ALIGN - 1 ) & ~( RISCV_DMA_ALIGN - 1 ) );
 
 	/* Free original allocation */
 	free_phys ( map->token, len );
@@ -121,10 +174,14 @@ static void riscv_dma_free ( struct dma_mapping *map,
 	/* Clear mapping */
 	map->dma = NULL;
 	map->token = NULL;
+
+	/* Decrement allocation count (for debugging) */
+	if ( DBG_LOG )
+		dma->allocated--;
 }
 
 PROVIDE_DMAAPI ( riscv, dma_map, riscv_dma_map );
-PROVIDE_DMAAPI_INLINE ( riscv, dma_unmap );
+PROVIDE_DMAAPI ( riscv, dma_unmap, riscv_dma_unmap );
 PROVIDE_DMAAPI ( riscv, dma_alloc, riscv_dma_alloc );
 PROVIDE_DMAAPI ( riscv, dma_free, riscv_dma_free );
 PROVIDE_DMAAPI ( riscv, dma_umalloc, riscv_dma_alloc );

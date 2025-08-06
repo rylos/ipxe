@@ -680,6 +680,28 @@ int fdt_u32 ( struct fdt *fdt, unsigned int offset, const char *name,
 }
 
 /**
+ * Get package handle (phandle) property
+ *
+ * @v fdt		Device tree
+ * @v offset		Starting node offset
+ * @ret phandle		Package handle, or 0 on error
+ */
+uint32_t fdt_phandle ( struct fdt *fdt, unsigned int offset ) {
+	uint32_t phandle;
+	int rc;
+
+	/* Get "phandle" or "linux,phandle" property */
+	if ( ( ( rc = fdt_u32 ( fdt, offset, "phandle", &phandle ) ) == 0 ) ||
+	     ( ( rc = fdt_u32 ( fdt, offset, "linux,phandle",
+				&phandle ) ) == 0 ) ) {
+		assert ( phandle != 0 );
+		return phandle;
+	}
+
+	return 0;
+}
+
+/**
  * Get region cell size specification
  *
  * @v fdt		Device tree
