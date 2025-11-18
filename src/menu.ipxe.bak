@@ -6,33 +6,30 @@ imgfree
 set menu-timeout 30000
 set submenu-timeout ${menu-timeout}
 isset ${menu-default} || set menu-default clonezilla
-# Server configuration
-set server-ip 192.168.1.1
-set nas-ip ${server-ip}
-set wimboot-url http://${server-ip}/wimboot
+# Figure out if client is 64-bit capable
+cpuid --ext 29 && set arch x64 || set arch x86
+cpuid --ext 29 && set archl amd64 || set archl i386
 
 :start
 menu iPXE Boot Menu
-item --gap --            ------------------------- Backup & Recovery -------------------------------
+item --gap --            ------------------------- Recovery Tools ----------------------------------
 item --key k clonezilla  Clonezilla Live
-item --key r rescuezilla Rescuezilla
-item --key m macrium     Macrium Recovery Media
 item --key s synomedia   Synology Recovery Media
-item --gap --            ------------------------- System Tools & Diagnostics ----------------------
+item --key m macrium     Macrium Recovery Media
+item --key r rescuezilla Rescuezilla
+item --key p minitool    MiniTool Partition Wizard
 item --key 1 sysresccd   System Rescue CD
-item --key h hirens      Hiren's BootCD PE
 item --key 2 strelec10   Sergei Strelec WinPE 10
 item --key 3 strelec11   Sergei Strelec WinPE 11
-item --key p minitool    MiniTool Partition Wizard
 item --key e easyuefi    EasyUEFI Enterprise
-item --gap --            ------------------------- Network Boot & Install --------------------------
-item --key a archlinux   Arch Linux (latest)
+item --gap --            ------------------------- Netboot (UEFI) ----------------------------------
 item --key n netboot     netboot.xyz
-item --gap --            ------------------------- Utility -----------------------------------------
+item --gap --            ---------------------------------------------------------------------------
 item --key c config      Configure settings
 item shell               Drop to iPXE shell
-item reboot              Reboot
-item --key x exit        Exit iPXE
+item reboot              Reboot computer
+item
+item --key x exit        Exit iPXE and continue BIOS boot
 choose --default ${menu-default} --timeout ${menu-timeout} selected || goto cancel
 set menu-timeout 0
 goto ${selected}
@@ -68,61 +65,62 @@ goto start
 
 ############ MAIN MENU ITEMS ############
 :sysresccd
-set base-url http://${server-ip}/sysresccd
+set base-url http://192.168.1.1/sysresccd
 kernel ${base-url}/vmlinuz initrd=intel_ucode.img,amd_ucode.img,sysresccd.img archisobasedir=/ ip=dhcp archiso_http_srv=${base-url}/ checksum setkmap=it
 initrd ${base-url}/intel_ucode.img
 initrd ${base-url}/amd_ucode.img
 initrd ${base-url}/sysresccd.img
 boot || goto failed
 
-# Generic WinPE boot function
-:boot_winpe
-kernel ${wimboot-url}
+:macrium
+set base-url http://192.168.1.1/macrium
+kernel ${base-url}/wimboot
 initrd ${base-url}/boot/BCD         BCD
 initrd ${base-url}/boot/boot.sdi    boot.sdi
 initrd ${base-url}/sources/boot.wim boot.wim
 boot || goto failed
 
-:macrium
-set base-url http://${server-ip}/macrium
-goto boot_winpe
-
 :synomedia
-set base-url http://${server-ip}/synomedia
-goto boot_winpe
+set base-url http://192.168.1.1/synomedia
+kernel ${base-url}/wimboot
+initrd ${base-url}/boot/BCD         BCD
+initrd ${base-url}/boot/boot.sdi    boot.sdi
+initrd ${base-url}/sources/boot.wim boot.wim
+boot || goto failed
 
 :minitool
-set base-url http://${server-ip}/minitool
-kernel ${wimboot-url}
+set base-url http://192.168.1.1/minitool
+kernel ${base-url}/wimboot
 initrd ${base-url}/boot/bcd         BCD
 initrd ${base-url}/boot/boot.sdi    boot.sdi
 initrd ${base-url}/sources/boot.wim boot.wim
 boot || goto failed
 
-# Strelec WinPE boot function
-:boot_strelec
-kernel ${wimboot-url} || goto failed
+:strelec10
+set base-url http://192.168.1.1/strelec
+kernel ${base-url}/wimboot || goto failed
 initrd --name network.cmd ${base-url}/network.cmd network.cmd || goto failed
 initrd --name bootx64.efi ${base-url}/bootx64.efi bootx64.efi || goto failed
 initrd --name bootmgr.exe ${base-url}/bootmgr64.exe bootmgr.exe || goto failed
 initrd --name BCD ${base-url}/bcd BCD || goto failed 
 initrd --name boot.sdi ${base-url}/boot.sdi boot.sdi || goto failed
-initrd --name boot.wim ${base-url}/SSTR/${strelec-wim} boot.wim || goto failed
+initrd --name boot.wim ${base-url}/strelec10x64Eng.wim boot.wim || goto failed
 boot || goto failed
 
-:strelec10
-set base-url http://${server-ip}/strelec
-set strelec-wim strelec10x64Eng.wim
-goto boot_strelec
-
 :strelec11
-set base-url http://${server-ip}/strelec
-set strelec-wim strelec11x64Eng.wim
-goto boot_strelec
+set base-url http://192.168.1.1/strelec
+kernel ${base-url}/wimboot || goto failed
+initrd --name network.cmd ${base-url}/network.cmd network.cmd || goto failed
+initrd --name bootx64.efi ${base-url}/bootx64.efi bootx64.efi || goto failed
+initrd --name bootmgr.exe ${base-url}/bootmgr64.exe bootmgr.exe || goto failed
+initrd --name BCD ${base-url}/bcd BCD || goto failed 
+initrd --name boot.sdi ${base-url}/boot.sdi boot.sdi || goto failed
+initrd --name boot.wim ${base-url}/strelec11x64Eng.wim boot.wim || goto failed
+boot || goto failed
 
 :easyuefi
-set base-url http://${server-ip}/easyuefi
-kernel ${wimboot-url}
+set base-url http://192.168.1.1/easyuefi
+kernel ${base-url}/wimboot
 initrd ${base-url}/boot/bcd         BCD
 initrd ${base-url}/boot/boot.sdi    boot.sdi
 initrd ${base-url}/bootx64.efi bootx64.efi
@@ -130,31 +128,18 @@ initrd ${base-url}/bootmgr     bootmgr
 initrd ${base-url}/sources/boot.wim boot.wim
 boot || goto failed
 
-:hirens
-set base-url http://${server-ip}/hirens
-kernel ${wimboot-url}
-initrd ${base-url}/boot/bcd         BCD
-initrd ${base-url}/boot/boot.sdi    boot.sdi
-initrd ${base-url}/bootmgr.efi bootmgr.efi
-initrd ${base-url}/bootmgr.exe bootmgr.exe
-initrd ${base-url}/sources/boot.wim boot.wim
-boot || goto failed
-
 :clonezilla
-set base-url http://${server-ip}/clonezilla
+set base-url http://192.168.1.1/clonezilla
+set nas-ip 192.168.1.1
 kernel ${base-url}/vmlinuz initrd=initrd.img boot=live username=user union=overlay config components quiet noswap edd=on nomodeset nodmraid keyboard-layouts=it locales=it_IT.UTF-8 fetch=${base-url}/filesystem.squashfs ocs_numlk=on ocs_daemonon="ssh" ocs_prerun="mount -t nfs ${nas-ip}:/volume2/backup /home/partimag"
 initrd ${base-url}/initrd.img
 boot || goto failed
 
 :rescuezilla
-set base-url http://${server-ip}/rescuezilla
+set base-url http://192.168.1.1/rescuezilla
 kernel ${base-url}/vmlinuz initrd=initrd.lz boot=casper quiet splash fastboot toram root=/dev/ram0 ramdisk_size=15000000 bootkbd=it console-setup/layoutcode=it ip=dhcp url=${base-url}/rescuezilla.iso
 initrd ${base-url}/initrd.lz
 boot || goto failed
 
 :netboot
 chain --autofree http://boot.netboot.xyz/ipxe/netboot.xyz.efi
-
-:archlinux
-chain --autofree http://${server-ip}/archlinux/ipxe-arch.efi || goto failed
-goto start
