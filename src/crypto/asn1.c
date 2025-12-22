@@ -83,19 +83,6 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #define EINFO_ENOTTY_ALGORITHM \
 	__einfo_uniqify ( EINFO_ENOTTY, 0x01, "Inappropriate algorithm" )
 
-/** "ecPublicKey" object identifier */
-static uint8_t oid_ecpublickey[] = { ASN1_OID_ECPUBLICKEY };
-
-/** Generic elliptic curve container algorithm
- *
- * The actual curve to be used is identified via the algorithm
- * parameters, rather than the top-level OID.
- */
-struct asn1_algorithm ecpubkey_algorithm __asn1_algorithm = {
-	.name = "ecPublicKey",
-	.oid = ASN1_CURSOR ( oid_ecpublickey ),
-};
-
 /**
  * Start parsing ASN.1 object
  *
@@ -373,6 +360,29 @@ int asn1_enter_bits ( struct asn1_cursor *cursor, unsigned int *unused ) {
 }
 
 /**
+ * Enter ASN.1 unsigned integer
+ *
+ * @v cursor		ASN.1 object cursor
+ * @ret rc		Return status code
+ */
+int asn1_enter_unsigned ( struct asn1_cursor *cursor ) {
+	int rc;
+
+	/* Enter integer */
+	if ( ( rc = asn1_enter ( cursor, ASN1_INTEGER ) ) != 0 )
+		return rc;
+
+	/* Skip initial positive sign byte if applicable */
+	if ( ( cursor->len > 1 ) &&
+	     ( *( ( uint8_t * ) cursor->data ) == 0x00 ) ) {
+		cursor->data++;
+		cursor->len--;
+	}
+
+	return 0;
+}
+
+/**
  * Parse value of ASN.1 boolean
  *
  * @v cursor		ASN.1 object cursor
@@ -641,22 +651,24 @@ int asn1_signature_algorithm ( const struct asn1_cursor *cursor,
  * Parse ASN.1 OID-identified elliptic curve algorithm
  *
  * @v cursor		ASN.1 object cursor
+ * @v wrapper		Optional wrapper algorithm, or NULL
  * @ret algorithm	Algorithm
  * @ret rc		Return status code
  */
 int asn1_curve_algorithm ( const struct asn1_cursor *cursor,
+			   struct asn1_algorithm *wrapper,
 			   struct asn1_algorithm **algorithm ) {
 	struct asn1_cursor curve;
 
 	/* Elliptic curves are identified as either:
 	 *
-	 * - the algorithm "id-ecPublicKey" with the actual curve
-	 *   specified in the algorithm parameters, or
+	 * - a wrapper algorithm "id-ecPublicKey" with the actual
+	 *   curve specified in the algorithm parameters, or
 	 *
 	 * - a standalone object identifier for the curve
 	 */
-	if ( asn1_check_algorithm ( cursor, &ecpubkey_algorithm,
-				    &curve ) != 0 ) {
+	if ( ( wrapper == NULL ) ||
+	     ( asn1_check_algorithm ( cursor, wrapper, &curve ) != 0 ) ) {
 		memcpy ( &curve, cursor, sizeof ( curve ) );
 	}
 
