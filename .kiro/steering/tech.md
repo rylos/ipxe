@@ -55,5 +55,10 @@ make bin-x86_64-efi/ipxe.efi EMBED=menu.ipxe
 
 ## Deployment
 The final `nas.efi` binary is deployed to:
-- Router TFTP server: `firewall.ziliani.net:/tftp/`
+- Router OpenWrt TFTP server: `firewall.ziliani.net:/tftp/` (porta SSH 44222)
+  ```bash
+  scp -P 44222 nas.efi root@firewall.ziliani.net:/tftp/nas.efi
+  ```
 - Local boot partition: `/boot/` (optional)
+
+**IMPORTANTE**: Il NAS Synology (192.168.1.1) serve solo le immagini boot via HTTP in `/volume1/web/`, NON ospita nas.efi

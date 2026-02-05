@@ -15,8 +15,8 @@ iPXE is an open-source network bootloader that enables booting operating systems
 
 ## Target Environment
 
-- Deployed on Synology NAS (192.168.1.1) serving boot images
-- Router-based TFTP/HTTP serving for PXE boot
+- NAS Synology (192.168.1.1) serve le immagini boot via HTTP in `/volume1/web/`
+- Router OpenWrt (firewall.ziliani.net) serve `nas.efi` via TFTP per PXE boot
 - Supports both x86 and x64 architectures
 - Primarily used for system recovery and diagnostics in home/small office environments
 
