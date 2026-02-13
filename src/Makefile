@@ -241,14 +241,18 @@ version :
 #
 # Predefined build shortcuts (for e.g. bin/ipxe.iso)
 
-# All drivers (excluding USB)
+# All drivers (defined on a per-platform basis)
 #
-DRIVERS_ipxe	= $(DRIVERS_net) $(DRIVERS_infiniband) \
-		  $(DRIVERS_xen) $(DRIVERS_hyperv)
+DRIVERS_ipxe	+=
 
 # Raspberry Pi
 #
-DRIVERS_rpi	= smsc95xx lan78xx
+DRIVERS_rpi	+= smsc95xx lan78xx
+
+# Virtualised NIC drivers with hypervisor-specific bus types
+#
+DRIVERS_vmbus_net	+= netvsc
+DRIVERS_xenbus_net	+= netfront
 
 ###############################################################################
 #

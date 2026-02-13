@@ -41,6 +41,14 @@ jobs:
                ${{ env.bindir }}/undionly.kpxe \
                ${{ env.bindir }}/errors
 
+      - name: Hardware list
+        working-directory: src
+        run: |
+          ./util/niclist.pl \
+              --format dokuwiki \
+              --sort bus-,vendor_id,device_id,device_name \
+              --output ${{ env.bindir }}/niclist.txt
+
       - name: Upload
         uses: actions/upload-artifact@v6
         with:
@@ -51,6 +59,7 @@ jobs:
             src/${{ env.bindir }}/ipxe.pxe
             src/${{ env.bindir }}/undionly.kpxe
             src/${{ env.bindir }}/errors
+            src/${{ env.bindir }}/niclist.txt
 
   sbi:
     name: SBI / ${{ matrix.arch }}
@@ -130,8 +139,41 @@ jobs:
             src/${{ env.bindir }}/snponly.efi
             src/${{ env.bindir }}/errors
 
-  tests:
-    name: Tests / ${{ matrix.arch }}
+  uefi-sb:
+    name: UEFI SB / ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - arm64
+          - x86_64
+    container:
+      image: ghcr.io/ipxe/ipxe-builder-${{ matrix.arch }}
+    env:
+      bindir: bin-${{ matrix.arch }}-efi-sb
+    steps:
+
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Build
+        working-directory: src
+        run: |
+          make ${{ env.bindir }}/ipxe.efi \
+               ${{ env.bindir }}/snponly.efi
+
+      - name: Upload
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.bindir }}
+          if-no-files-found: error
+          path: |
+            src/${{ env.bindir }}/ipxe.efi
+            src/${{ env.bindir }}/snponly.efi
+
+  linux:
+    name: Linux / ${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -163,7 +205,19 @@ jobs:
       - name: Build
         working-directory: src
         run: |
-          make ${{ env.bindir }}/tests.linux
+          make ${{ env.bindir }}/ipxe.linux \
+               ${{ env.bindir }}/tests.linux \
+               ${{ env.bindir }}/errors
+
+      - name: Upload
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.bindir }}
+          if-no-files-found: error
+          path: |
+            src/${{ env.bindir }}/ipxe.linux
+            src/${{ env.bindir }}/tests.linux
+            src/${{ env.bindir }}/errors
 
       - name: Test
         working-directory: src
@@ -227,7 +281,8 @@ jobs:
       - bios
       - sbi
       - uefi
-      - tests
+      - uefi-sb
+      - linux
       - combine
     if: >-
       github.event_name == 'push' &&
