@@ -57,6 +57,8 @@ GENKEYMAP	:= ./util/genkeymap.py
 DOXYGEN		:= doxygen
 LCAB		:= lcab
 QEMUIMG		:= qemu-img
+PANDOC		:= pandoc
+ENVSUBST	:= envsubst
 
 ###############################################################################
 #
@@ -241,14 +243,17 @@ version :
 #
 # Predefined build shortcuts (for e.g. bin/ipxe.iso)
 
-# All drivers (excluding USB)
+# All drivers (defined on a per-platform basis)
 #
-DRIVERS_ipxe	= $(DRIVERS_net) $(DRIVERS_infiniband) \
-		  $(DRIVERS_xen) $(DRIVERS_hyperv)
+DRIVERS_ipxe	+=
+
+# All drivers (excluding USB network devices)
+#
+DRIVERS_ipxe-legacy = $(filter-out $(DRIVERS_usb_net),$(DRIVERS_ipxe))
 
 # Raspberry Pi
 #
-DRIVERS_rpi	= smsc95xx lan78xx
+DRIVERS_rpi	+= smsc95xx lan78xx
 
 ###############################################################################
 #
