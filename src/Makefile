@@ -212,9 +212,9 @@ install :
 #
 # Version number calculations
 #
-VERSION_MAJOR	:= 1
-VERSION_MINOR	:= 21
-VERSION_PATCH	:= 1
+VERSION_MAJOR	:= 2
+VERSION_MINOR	:= 0
+VERSION_PATCH	:= 0
 EXTRAVERSION	:= +
 ifneq ($(wildcard ../.git/HEAD),)
 GITVERSION	:= $(shell cat ../.git/HEAD)
