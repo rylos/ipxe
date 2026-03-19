@@ -1,49 +1,40 @@
-# iPXE Boot Menu Personalizzato
+# iPXE Boot Menu
 
-Questo progetto contiene una configurazione personalizzata di iPXE con un menu di boot per strumenti di recovery e diagnostica.
+Menu iPXE personalizzato per boot di rete con tool di recovery e diagnostica.
 
-## Descrizione
+## Architettura
 
-iPXE è un bootloader di rete open source che permette di avviare sistemi operativi e strumenti direttamente dalla rete. Questo repository include un menu personalizzato (`src/menu.ipxe`) con una collezione di strumenti di recovery e diagnostica.
-
-## Menu Disponibili
-
-### Recovery Tools
-- **Clonezilla Live** - Clonazione e backup di dischi
-- **Synology Recovery Media** - Media di recovery per NAS Synology
-- **Macrium Recovery Media** - Strumento di backup e recovery
-- **Rescuezilla** - Alternativa open source a Clonezilla
-- **MiniTool Partition Wizard** - Gestione partizioni
-- **System Rescue CD** - Distribuzione Linux per recovery
-- **Sergei Strelec WinPE 10/11** - Ambiente Windows PE per diagnostica
-- **EasyUEFI Enterprise** - Gestione boot UEFI
-
-### Netboot
-- **netboot.xyz** - Menu di boot di rete con molte distribuzioni
-
-## Caratteristiche
-
-- Menu con timeout di 30 secondi
-- Rilevamento automatico architettura (x86/x64)
-- Gestione errori robusta con fallback
-- Supporto per boot UEFI e BIOS
-- Shell iPXE integrata per debugging
-
-## Compilazione
-
-```bash
-cd src
-make
+```
+Client UEFI → DHCP (router OpenWrt) → TFTP nas.efi (router) → HTTP immagini (NAS Synology)
 ```
 
-## Configurazione
+## Quick Start
 
-Il menu principale è definito in `src/menu.ipxe`. Modifica questo file per personalizzare le opzioni di boot e gli URL dei server.
+```bash
+# Build
+./build.sh
 
-## Requisiti
+# Deploy su router
+scp -P 44222 nas.efi root@firewall.ziliani.net:/tftp/nas.efi
+```
 
-- Server HTTP per ospitare le immagini di boot
-- Rete configurata con DHCP
-- iPXE compilato e configurato sul server TFTP/HTTP
+## Tool
 
-Per maggiori dettagli su iPXE: http://ipxe.org
+| Categoria | Tool |
+|-----------|------|
+| Backup & Recovery | Clonezilla, Rescuezilla, Macrium, Synology Recovery |
+| System Tools | System Rescue CD, Hiren's, Strelec 10/11, MiniTool, EasyUEFI |
+| Network Boot | Arch Linux, netboot.xyz |
+
+## File principali
+
+| File | Descrizione |
+|------|-------------|
+| `src/menu.ipxe` | Menu boot (embedded in nas.efi) |
+| `src/config/general.h` | Configurazione feature |
+| `build.sh` | Script di compilazione |
+| `SETUP.md` | Documentazione tecnica completa |
+
+## Documentazione
+
+Vedi [SETUP.md](SETUP.md) per deploy, configurazione server, aggiunta tool e troubleshooting.

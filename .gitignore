@@ -1,0 +1,3 @@
+nas.efi
+src/bin-x86_64-efi/
+src/util/elf2efi64

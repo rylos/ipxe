@@ -1,64 +1,35 @@
-# Technology Stack
+# Tech Stack
 
-## Build System
+## Build
 
-- **Primary Build Tool**: GNU Make
-- **Compiler**: GCC with cross-compilation support
-- **Architecture**: C-based codebase with assembly components
-- **Target Platforms**: x86, x86_64, ARM, RISC-V, LoongArch
-
-## Key Technologies
-
-- **Network Protocols**: IPv4, DHCP, TFTP, HTTP, ARP, UDP, TCP
-- **Boot Standards**: PXE, UEFI, BIOS
-- **Cryptography**: TLS, various hash algorithms (MD5, SHA1, SHA256, etc.)
-- **Image Formats**: ELF, PE, various compression formats
-- **File Systems**: Basic support for network-based file access
-
-## Build Commands
-
-### Standard Build
 ```bash
-cd src
-make
+./build.sh          # compila e copia in nas.efi (root progetto)
 ```
 
-### Custom Build (Project-Specific)
-```bash
-# Build UEFI binary with embedded menu
-cd src
-make bin-x86_64-efi/ipxe.efi EMBED=menu.ipxe
+Internamente: `make bin-x86_64-efi/ipxe.efi EMBED=menu.ipxe` in `src/`.
 
-# Or use the project build script
-./build.sh
+Dipendenze: GCC, GNU Make, Perl, OpenSSL.
+
+## Deploy
+
+```bash
+# Router OpenWrt (TFTP)
+scp -P 44222 nas.efi root@firewall.ziliani.net:/tftp/nas.efi
+
+# PC casa (boot locale, opzionale)
+scp -P 22222 nas.efi marco@home.ziliani.net:/tmp/nas.efi
+ssh -t -p 22222 marco@home.ziliani.net "sudo mv /tmp/nas.efi /boot/"
 ```
 
-### Common Build Targets
-- `bin/ipxe.iso` - Bootable CD-ROM image
-- `bin/ipxe.usb` - Bootable USB image  
-- `bin/ipxe.pxe` - PXE chainload image
-- `bin-x86_64-efi/ipxe.efi` - UEFI application
-- `bin/undionly.kpxe` - UNDI-only PXE image
+Il NAS (192.168.1.1) serve solo immagini via HTTP, non ospita nas.efi.
 
-### Configuration
-- Configuration files in `src/config/` directory
-- Main config: `src/config/general.h`
-- Platform-specific configs in `src/config/defaults/`
-- Custom menu: `src/menu.ipxe`
+## Flusso PXE
 
-### Dependencies
-- GCC toolchain
-- GNU Make
-- Perl (for build scripts)
-- OpenSSL (for crypto features)
-- Standard POSIX utilities
+Client UEFI → DHCP (router) → TFTP nas.efi (router) → HTTP immagini (NAS)
 
-## Deployment
-The final `nas.efi` binary is deployed to:
-- Router OpenWrt TFTP server: `firewall.ziliani.net:/tftp/` (porta SSH 44222)
-  ```bash
-  scp -P 44222 nas.efi root@firewall.ziliani.net:/tftp/nas.efi
-  ```
-- Local boot partition: `/boot/` (optional)
+## Config chiave
 
-**IMPORTANTE**: Il NAS Synology (192.168.1.1) serve solo le immagini boot via HTTP in `/volume1/web/`, NON ospita nas.efi
+- `src/menu.ipxe` — menu boot (embedded a compile-time)
+- `src/config/general.h` — feature e timeout
+- `build.sh` — script build
+- `SETUP.md` — documentazione deploy completa

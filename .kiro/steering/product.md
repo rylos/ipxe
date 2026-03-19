@@ -1,25 +1,23 @@
-# Product Overview
+# Product
 
-iPXE is an open-source network bootloader that enables booting operating systems and tools directly over the network. This repository contains a customized iPXE configuration with a personalized boot menu for recovery and diagnostic tools.
+iPXE custom con menu boot di rete per recovery e diagnostica.
 
-## Key Features
+## Output
 
-- Network-based booting via PXE/UEFI
-- Custom boot menu with 30-second timeout
-- Support for both BIOS and UEFI systems
-- Collection of recovery and diagnostic tools including:
-  - Clonezilla Live (disk cloning/backup)
-  - System Rescue CD (Linux recovery environment)
-  - Various Windows PE-based tools (Macrium, Synology Recovery, etc.)
-  - Network boot options (netboot.xyz, Arch Linux)
+`nas.efi` — bootloader UEFI x86_64 con menu embedded (`src/menu.ipxe`).
 
-## Target Environment
+## Infrastruttura
 
-- NAS Synology (192.168.1.1) serve le immagini boot via HTTP in `/volume1/web/`
-- Router OpenWrt (firewall.ziliani.net) serve `nas.efi` via TFTP per PXE boot
-- Supports both x86 and x64 architectures
-- Primarily used for system recovery and diagnostics in home/small office environments
+- Router OpenWrt (`firewall.ziliani.net`) → TFTP server, serve `nas.efi` ai client PXE
+- NAS Synology (`192.168.1.1`) → HTTP server, serve immagini boot in `/volume1/web/`
+- Il NAS NON ospita nas.efi
 
-## Main Deliverable
+## Tool disponibili
 
-The primary output is `nas.efi` - a UEFI-compatible iPXE bootloader with embedded menu configuration.
+| Tipo | Tool |
+|------|------|
+| Backup/Recovery | Clonezilla, Rescuezilla, Macrium, Synology Recovery |
+| System Tools | System Rescue CD, Hiren's, Strelec 10/11, MiniTool, EasyUEFI |
+| Network Boot | Arch Linux (locale), netboot.xyz (remoto) |
+
+Menu timeout: 30s, default: Clonezilla.

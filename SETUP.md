@@ -1,179 +1,165 @@
-# iPXE Boot Menu - Documentazione Tecnica
+# iPXE Boot Menu - Setup & Deploy
 
-## Panoramica
-Menu iPXE personalizzato per boot di rete con strumenti di recovery e diagnostica.
+## Architettura
 
-## Struttura Server
-
-### Server Web: `192.168.1.1` (NAS Synology)
-- **Accesso SSH**: `ssh -p 2222 marco@home.ziliani.net`
-- **Path web**: `/volume1/web/`
-- **Docker**: `/usr/local/bin/docker` (richiede sudo)
-
-### File Condivisi
 ```
-/volume1/web/
-├── wimboot              # WinPE bootloader (v2.7.3+) - condiviso da tutti i progetti WinPE
-├── clonezilla/          # Clonezilla Live
-├── rescuezilla/         # Rescuezilla
-├── sysresccd/           # System Rescue CD
-├── macrium/             # Macrium Recovery Media (WinPE)
-├── synomedia/           # Synology Recovery Media (WinPE)
-├── minitool/            # MiniTool Partition Wizard (WinPE)
-├── easyuefi/            # EasyUEFI Enterprise (WinPE)
-├── hirens/              # Hiren's BootCD PE (WinPE)
-└── strelec/             # Sergei Strelec WinPE 10/11
+Client PXE (UEFI)
+  │
+  ├─ DHCP → Router OpenWrt (firewall.ziliani.net)
+  │           opzioni PXE: next-server + filename
+  │
+  ├─ TFTP → Router OpenWrt (/tftp/nas.efi)
+  │           bootloader iPXE con menu embedded
+  │
+  └─ HTTP → NAS Synology (192.168.1.1)
+              /volume1/web/{tool}/  ← immagini boot
 ```
 
-## Configurazione Menu
+## Build & Deploy
 
-### File Principale
-- **Path**: `src/menu.ipxe`
-- **Backup**: `src/menu.ipxe.bak`
-
-### Variabili Globali
-```ipxe
-set server-ip 192.168.1.1          # IP server web
-set nas-ip ${server-ip}            # IP NAS per mount NFS
-set wimboot-url http://${server-ip}/wimboot  # WinPE bootloader condiviso
-```
-
-### Struttura Menu
-1. **Recovery Tools** - Strumenti di recovery e diagnostica
-2. **Netboot (UEFI)** - netboot.xyz
-3. **Utility** - Config, shell, reboot
-
-## Compilazione e Deploy
-
-### Compilazione
 ```bash
-cd /home/marco/dev/ipxe
-./build.sh
-```
-Questo genera `/home/marco/dev/ipxe/nas.efi`
+# Compilazione
+./build.sh                # → nas.efi (root progetto)
 
-**IMPORTANTE:** Usare sempre `nas.efi` dalla root del progetto, NON `src/bin-x86_64-efi/ipxe.efi`
+# Deploy su router OpenWrt
+scp -P 44222 nas.efi root@firewall.ziliani.net:/tftp/nas.efi
 
-### Deploy su Router e PC Casa
-
-**Router (firewall.ziliani.net):**
-```bash
-scp -P 44222 /home/marco/dev/ipxe/nas.efi root@firewall.ziliani.net:/tftp/nas.efi
-scp -P 44222 /home/marco/dev/ipxe/src/menu.ipxe root@firewall.ziliani.net:/tftp/menu.ipxe
-```
-
-**PC di casa (home.ziliani.net) - opzionale:**
-```bash
-scp -P 22222 /home/marco/dev/ipxe/nas.efi marco@home.ziliani.net:/tmp/nas.efi
+# Deploy su PC casa (opzionale, per boot locale)
+scp -P 22222 nas.efi marco@home.ziliani.net:/tmp/nas.efi
 ssh -t -p 22222 marco@home.ziliani.net "sudo mv /tmp/nas.efi /boot/"
 ```
 
-## Progetti WinPE
+## Server Web - NAS Synology (192.168.1.1)
 
-### Struttura Standard
-Ogni progetto WinPE richiede:
+SSH: `ssh -p 2222 marco@home.ziliani.net`
+
+```
+/volume1/web/
+├── wimboot                  # WinPE bootloader (≥ v2.7.3)
+├── clonezilla/              # Clonezilla Live
+├── rescuezilla/             # Rescuezilla
+├── sysresccd/               # System Rescue CD
+├── macrium/                 # Macrium Recovery (WinPE)
+├── synomedia/               # Synology Recovery (WinPE)
+├── minitool/                # MiniTool Partition Wizard (WinPE)
+├── easyuefi/                # EasyUEFI Enterprise (WinPE)
+├── hirens/                  # Hiren's BootCD PE (WinPE)
+├── strelec/                 # Sergei Strelec WinPE 10/11
+└── archlinux/ipxe-arch.efi  # Arch Linux netboot
+```
+
+## Menu iPXE
+
+File: `src/menu.ipxe` (embedded in nas.efi durante la build)
+
+Variabili globali:
+
+```ipxe
+set server-ip 192.168.1.1
+set nas-ip ${server-ip}
+set wimboot-url http://${server-ip}/wimboot
+```
+
+Timeout: 30s, default: Clonezilla.
+
+### Voci menu
+
+| Categoria | Tool | Tipo |
+|-----------|------|------|
+| Backup & Recovery | Clonezilla, Rescuezilla, Macrium, Synology Recovery | Linux / WinPE |
+| System Tools | System Rescue CD, Hiren's, Strelec 10/11, MiniTool, EasyUEFI | Linux / WinPE |
+| Network Boot | Arch Linux, netboot.xyz | Chain |
+
+## Struttura progetti boot
+
+### WinPE standard (macrium, synomedia)
+
 ```
 project/
 ├── boot/
-│   ├── bcd              # Boot Configuration Data
-│   └── boot.sdi         # System Deployment Image
+│   ├── BCD (o bcd)
+│   └── boot.sdi
 └── sources/
-    └── boot.wim         # Windows PE image
+    └── boot.wim
 ```
 
-### Boot WinPE Generico
-Usa la funzione `boot_winpe` per progetti standard (macrium, synomedia):
-```ipxe
-:project
-set base-url http://${server-ip}/project
-goto boot_winpe
+Usano la funzione `boot_winpe` nel menu. Attenzione al case di BCD/bcd (varia per progetto).
+
+### WinPE custom (hirens, easyuefi, strelec)
+
+Richiedono file aggiuntivi (bootmgr, bootx64.efi, ecc.). Ogni progetto ha la sua sezione dedicata nel menu.
+
+### Linux (clonezilla, sysresccd, rescuezilla)
+
+Kernel + initrd + parametri specifici. Clonezilla monta NFS `${nas-ip}:/volume2/backup` su `/home/partimag`.
+
+## Strelec - Note speciali
+
+Struttura con file duplicati obbligatori:
+
+```
+strelec/
+├── bootx64.efi, bootmgr64.exe, bcd, boot.sdi, network.cmd
+└── SSTR/
+    ├── bootx64.efi, bootmgr64.exe, bcd, boot.sdi  ← duplicati identici
+    ├── strelec10x64Eng.wim
+    └── strelec11x64Eng.wim
 ```
 
-### Boot WinPE Personalizzato
-Per progetti con file aggiuntivi (strelec, easyuefi, hirens):
-```ipxe
-:project
-set base-url http://${server-ip}/project
-kernel ${wimboot-url}
-initrd ${base-url}/boot/bcd         BCD
-initrd ${base-url}/boot/boot.sdi    boot.sdi
-initrd ${base-url}/bootmgr.efi      bootmgr.efi  # se necessario
-initrd ${base-url}/sources/boot.wim boot.wim
-boot || goto failed
-```
+I file boot in root e SSTR/ devono avere hash identici. Verificare con `md5sum`.
 
-## Progetti Linux
+`network.cmd` monta `\\192.168.1.1\web\strelec` (user: `web`, pass: `0jSpjMjZT0a0oG`) e configura rete/WiFi.
 
-### Clonezilla
-- **Kernel**: vmlinuz
-- **Initrd**: initrd.img
-- **Filesystem**: filesystem.squashfs
-- **Mount NFS**: `/volume2/backup` → `/home/partimag`
-- **Locale**: italiano (it_IT.UTF-8)
+### Aggiornamento Strelec
 
-### System Rescue CD
-- **Kernel**: vmlinuz
-- **Initrd**: intel_ucode.img, amd_ucode.img, sysresccd.img
-- **Keyboard**: italiano (setkmap=it)
+1. Copiare nuova versione in directory temporanea
+2. Copiare file boot dalla vecchia versione (root + SSTR/)
+3. Verificare case BCD (Strelec usa `bcd` minuscolo)
+4. Verificare WIM in SSTR/, non in root
+5. Verificare hash identici: `md5sum bootx64.efi` in entrambi i path
+6. Testare boot prima di sostituire
 
-### Rescuezilla
-- **Kernel**: vmlinuz
-- **Initrd**: initrd.lz
-- **Boot**: casper (Ubuntu-based)
-- **Keyboard**: italiano
+## Arch Linux Netboot
 
-### Arch Linux Netboot
-- **File locale**: `/volume1/web/archlinux/ipxe-arch.efi` (1 MB)
-- **Fonte**: https://archlinux.org/static/netboot/ipxe-arch.efi
-- **Aggiornamento**: Manuale (raramente necessario, mesi/anni)
-- **Motivo file locale**: archlinux.org forza HTTPS, iPXE non supporta HTTPS senza ricompilazione complessa
-- **Alternativa non funzionante**: ~~`http://ipxe.archlinux.org/releng/netboot/archlinux.ipxe`~~ (redirect a HTTPS)
+File locale: `/volume1/web/archlinux/ipxe-arch.efi`
 
-**Aggiornamento file:**
+archlinux.org forza HTTPS, non supportato da iPXE senza ricompilazione. Si usa una copia locale aggiornata manualmente:
+
 ```bash
 wget https://archlinux.org/static/netboot/ipxe-arch.efi -O /tmp/ipxe-arch.efi
 rsync -avP /tmp/ipxe-arch.efi -e "ssh -p 2222" marco@home.ziliani.net:/volume1/web/archlinux/
 ```
 
-## Aggiungere Nuovo Progetto
+## Aggiungere un nuovo tool
 
-### 1. WinPE (es. nuovo tool)
+### WinPE
+
 ```bash
-# Sul server
-mkdir -p /volume1/web/newtool/boot /volume1/web/newtool/sources
-
-# Copia file necessari
-rsync -avP /path/to/iso/boot/bcd /volume1/web/newtool/boot/
-rsync -avP /path/to/iso/boot/boot.sdi /volume1/web/newtool/boot/
-rsync -avP /path/to/iso/sources/boot.wim /volume1/web/newtool/sources/
+# Sul NAS
+mkdir -p /volume1/web/newtool/{boot,sources}
+# Copiare BCD, boot.sdi, boot.wim
 ```
 
-Nel menu iPXE:
-```ipxe
-# Aggiungi voce menu
-item --key x newtool     New Tool Name
+Nel menu (`src/menu.ipxe`):
 
-# Aggiungi sezione boot
+```ipxe
+item --key x newtool  New Tool Name
+
 :newtool
 set base-url http://${server-ip}/newtool
 goto boot_winpe
 ```
 
-### 2. Linux (es. nuova distro)
-```bash
-# Sul server
-mkdir -p /volume1/web/newdistro
+### Linux
 
-# Copia kernel, initrd e filesystem
-rsync -avP /path/to/iso/ /volume1/web/newdistro/
+```bash
+mkdir -p /volume1/web/newdistro
+# Copiare kernel, initrd, filesystem
 ```
 
-Nel menu iPXE:
 ```ipxe
-# Aggiungi voce menu
-item --key x newdistro   New Distro Name
+item --key x newdistro  New Distro Name
 
-# Aggiungi sezione boot
 :newdistro
 set base-url http://${server-ip}/newdistro
 kernel ${base-url}/vmlinuz <parametri>
@@ -181,150 +167,21 @@ initrd ${base-url}/initrd.img
 boot || goto failed
 ```
 
-## Ottimizzazioni Applicate
-
-### 2025-11-18
-- ✅ Centralizzato IP server in variabile `server-ip`
-- ✅ Creata funzione `boot_winpe` per ridurre duplicazione
-- ✅ Creata funzione `boot_strelec` parametrizzata
-- ✅ Rimosso rilevamento architettura inutilizzato
-- ✅ Wimboot aggiornato a v2.7.3+ (supporto compressione Hiren's)
-- ✅ Wimboot centralizzato in `/volume1/web/wimboot`
-- ✅ Aggiunto Hiren's BootCD PE
-
-## Note Tecniche
-
-### Wimboot
-- **Versione minima**: 2.7.3 (per Hiren's BootCD PE)
-- **Download**: https://github.com/ipxe/wimboot/releases/latest
-- **Motivo**: Supporto compressione massima boot.wim
-
-### Case Sensitivity
-I nomi file WinPE sono case-sensitive:
-- `BCD` vs `bcd` - dipende dal progetto
-- `BOOTMGR` vs `bootmgr` - verificare sempre
-
-### Dimensioni
-- boot.wim tipico: 1-2 GB
-- Tempo download via HTTP: ~8-10 secondi (rete gigabit)
-
-## Gestione Sergei Strelec WinPE
-
-### Struttura Speciale
-Strelec richiede una struttura duplicata per funzionare correttamente:
-
-```
-strelec/
-├── bootia32.efi         # File boot (root)
-├── bootmgr32.exe
-├── bootmgr64.exe
-├── bootx64.efi
-├── bcd
-├── boot.sdi
-├── network.cmd          # Script di inizializzazione rete
-└── SSTR/                # Directory principale
-    ├── bootia32.efi     # File boot (duplicati identici)
-    ├── bootmgr32.exe
-    ├── bootmgr64.exe
-    ├── bootx64.efi
-    ├── bcd
-    ├── boot.sdi
-    ├── strelec10x64Eng.wim  # WinPE 10 (caricato da iPXE)
-    ├── strelec11x64Eng.wim  # WinPE 11 (caricato da iPXE)
-    ├── WLANProfile/     # Profili WiFi
-    ├── DriverPacks/
-    ├── _WIN/
-    └── ... (altri file)
-```
-
-**IMPORTANTE:** I file `.wim` devono essere **in SSTR**, non nella root. iPXE li carica da `http://192.168.1.1/strelec/SSTR/strelecXXx64Eng.wim`.
-
-### File Boot Duplicati
-I file `bootia32.efi`, `bootmgr32.exe`, `bootmgr64.exe`, `bootx64.efi` devono essere:
-- ✅ Presenti in **root** (`/volume1/web/strelec/`)
-- ✅ Presenti in **SSTR** (`/volume1/web/strelec/SSTR/`)
-- ✅ **Identici** (stesso hash MD5)
-
-**Verifica:**
-```bash
-md5sum /volume1/web/strelec/bootx64.efi /volume1/web/strelec/SSTR/bootx64.efi
-# Devono avere lo stesso hash
-```
-
-### network.cmd
-Script eseguito all'avvio che:
-1. Monta share di rete: `\\192.168.1.1\web\strelec`
-2. Cerca drive locale con `\SSTR\WLANProfile`
-3. Imposta variabile `%strelec%` con lettera drive
-4. Configura rete (DHCP, WiFi, firewall)
-5. Carica profili WiFi da `%strelec%\SSTR\WLANProfile`
-6. Monta share temp: `\\192.168.1.1\temp`
-
-**Credenziali share:**
-- User: `web`
-- Password: `0jSpjMjZT0a0oG`
-
-### Aggiornamento Versione
-Quando si aggiorna Strelec:
-
-1. **Copia nuova versione** in directory temporanea (es. `strelec_new_tofix`)
-2. **Verifica file boot** in entrambi i percorsi:
-   ```bash
-   # Copia dalla vecchia versione
-   cp /volume1/web/strelec/boot*.{efi,exe} /volume1/web/strelec_new/
-   cp /volume1/web/strelec/SSTR/boot*.{efi,exe} /volume1/web/strelec_new/SSTR/
-   ```
-3. **Verifica BCD case** - Strelec usa `bcd` minuscolo:
-   ```bash
-   # Rimuovi BCD maiuscolo se presente
-   rm /volume1/web/strelec_new/SSTR/BCD
-   # Copia bcd minuscolo dalla vecchia
-   cp /volume1/web/strelec/SSTR/bcd /volume1/web/strelec_new/SSTR/
-   ```
-4. **Verifica hash identici**:
-   ```bash
-   md5sum /volume1/web/strelec_new/bootx64.efi /volume1/web/strelec_new/SSTR/bootx64.efi
-   ```
-5. **File TBWinPE opzionali** - I file `TBWinPE*.log` sono log di compilazione, non necessari per il boot
-6. **Verifica WIM in SSTR** - I file `.wim` devono essere in SSTR, non in root:
-   ```bash
-   # Se i WIM sono in root, spostarli in SSTR
-   mv /volume1/web/strelec_new/*.wim /volume1/web/strelec_new/SSTR/
-   ```
-7. **Testa boot** prima di sostituire la vecchia
-8. **Backup vecchia versione** prima di sovrascrivere
-
-### Differenze tra Versioni
-- **WIM più recenti**: dimensioni leggermente diverse
-- **File log**: `TBWinPE*.log`, `TBWinPE_BootWIM*` potrebbero mancare (non critici, sono cache di compilazione)
-- **BCD case**: Strelec usa `bcd` minuscolo in SSTR, non `BCD` maiuscolo
+Dopo le modifiche: `./build.sh` e deploy su router.
 
 ## Troubleshooting
 
-### Boot WinPE fallisce
-1. Verificare versione wimboot (>= 2.7.3)
-2. Controllare case dei file (BCD vs bcd)
-3. Verificare presenza tutti i file richiesti
-4. Testare download HTTP manuale
-
-### Strelec: errore "non trova \SSTR\xxxx"
-1. Verificare file boot duplicati in root e SSTR
-2. Controllare hash identici: `md5sum bootx64.efi`
-3. Verificare `network.cmd` corretto
-4. Controllare share di rete accessibile: `\\192.168.1.1\web\strelec`
-
-### Mount NFS Clonezilla fallisce
-1. Verificare export NFS su NAS
-2. Controllare firewall
-3. Testare mount manuale: `mount -t nfs 192.168.1.1:/volume2/backup /mnt`
-
-### Timeout DHCP
-1. Verificare server DHCP attivo
-2. Controllare opzioni PXE (66, 67)
-3. Testare con `dhcp` manuale in shell iPXE
+| Problema | Verifica |
+|----------|----------|
+| WinPE non parte | wimboot ≥ 2.7.3? Case BCD corretto? File tutti presenti? |
+| Strelec "non trova \SSTR\..." | File boot duplicati in root e SSTR? Hash identici? network.cmd ok? |
+| NFS Clonezilla fallisce | Export NFS attivo? Firewall? `mount -t nfs 192.168.1.1:/volume2/backup /mnt` |
+| Timeout DHCP | Server DHCP attivo? Opzioni PXE (66, 67) configurate? |
+| Download lento | Verificare rete gigabit. boot.wim ~1-2 GB → ~8-10s su gigabit |
 
 ## Riferimenti
-- iPXE: http://ipxe.org
-- Wimboot: https://github.com/ipxe/wimboot
-- Hiren's BootCD PE: https://www.hirensbootcd.org
-- System Rescue: https://www.system-rescue.org
+
+- [iPXE](http://ipxe.org)
+- [Wimboot](https://github.com/ipxe/wimboot) (≥ v2.7.3)
+- [Hiren's BootCD PE](https://www.hirensbootcd.org)
+- [System Rescue](https://www.system-rescue.org)
