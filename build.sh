@@ -9,8 +9,10 @@
 #   - Arch Linux (systemd-boot): copiare nas.efi nella ESP (es. /boot/)
 #     e creare una entry in /boot/loader/entries/
 
+set -e
+
 cd src
-make bin-x86_64-efi/ipxe.efi EMBED=menu.ipxe
+make -j$(nproc) bin-x86_64-efi/ipxe.efi EMBED=menu.ipxe
 cp bin-x86_64-efi/ipxe.efi ../nas.efi
 cd ..
 

@@ -19,13 +19,13 @@ FILE_SECBOOT ( PERMITTED );
  */
 
 /* Protocols supported on all platforms */
-#define NET_PROTO_EAPOL		/* EAP over LAN protocol */
+//#define NET_PROTO_EAPOL	/* EAP over LAN protocol */
 //#define NET_PROTO_FCOE	/* Fibre Channel over Ethernet protocol */
 #define NET_PROTO_IPV4		/* IPv4 protocol */
 #define NET_PROTO_IPV6		/* IPv6 protocol */
-#define NET_PROTO_LACP		/* Link Aggregation control protocol */
-#define NET_PROTO_LLDP		/* Link Layer Discovery protocol */
-#define NET_PROTO_STP		/* Spanning Tree protocol */
+//#define NET_PROTO_LACP	/* Link Aggregation control protocol */
+//#define NET_PROTO_LLDP	/* Link Layer Discovery protocol */
+//#define NET_PROTO_STP		/* Spanning Tree protocol */
 
 /* Disable protocols not historically included in BIOS builds */
 #if defined ( PLATFORM_pcbios )
@@ -73,11 +73,11 @@ FILE_SECBOOT ( PERMITTED );
 
 /* Protocols supported on all platforms with SAN boot abstractions */
 #if ! defined ( SANBOOT_NULL )
-  #define SANBOOT_PROTO_AOE	/* AoE protocol */
-  #define SANBOOT_PROTO_FCP	/* Fibre Channel protocol */
-  #define SANBOOT_PROTO_HTTP	/* HTTP SAN protocol */
-  #define SANBOOT_PROTO_IB_SRP	/* Infiniband SCSI RDMA protocol */
-  #define SANBOOT_PROTO_ISCSI	/* iSCSI protocol */
+  //#define SANBOOT_PROTO_AOE	/* AoE protocol */
+  //#define SANBOOT_PROTO_FCP	/* Fibre Channel protocol */
+  //#define SANBOOT_PROTO_HTTP	/* HTTP SAN protocol */
+  //#define SANBOOT_PROTO_IB_SRP	/* Infiniband SCSI RDMA protocol */
+  //#define SANBOOT_PROTO_ISCSI	/* iSCSI protocol */
 #endif
 
 /*****************************************************************************
@@ -93,9 +93,9 @@ FILE_SECBOOT ( PERMITTED );
 #define CONSOLE_CMD		/* Console command */
 #define DIGEST_CMD		/* Image crypto digest commands */
 #define DHCP_CMD		/* DHCP management commands */
-#define FCMGMT_CMD		/* Fibre Channel management commands */
+//#define FCMGMT_CMD		/* Fibre Channel management commands */
 #define FORM_CMD		/* Form commands */
-#define IBMGMT_CMD		/* Infiniband management commands */
+//#define IBMGMT_CMD		/* Infiniband management commands */
 #define IFMGMT_CMD		/* Interface management commands */
 #define IMAGE_CMD		/* Image management commands */
 #define IMAGE_ARCHIVE_CMD	/* Archive image management commands */
@@ -103,7 +103,7 @@ FILE_SECBOOT ( PERMITTED );
 //#define IMAGE_MEM_CMD		/* Read memory command */
 //#define IMAGE_TRUST_CMD	/* Image trust management commands */
 //#define IPSTAT_CMD		/* IP statistics commands */
-#define IWMGMT_CMD		/* Wireless interface management commands */
+//#define IWMGMT_CMD		/* Wireless interface management commands */
 #define LOGIN_CMD		/* Login command */
 //#define LOTEST_CMD		/* Loopback testing commands */
 #define MENU_CMD		/* Menu commands */
@@ -117,13 +117,13 @@ FILE_SECBOOT ( PERMITTED );
 //#define PROFSTAT_CMD		/* Profiling commands */
 //#define PXE_CMD		/* PXE commands */
 #define ROUTE_CMD		/* Routing table management commands */
-#define SANBOOT_CMD		/* SAN boot commands */
+//#define SANBOOT_CMD		/* SAN boot commands */
 #define SHELL_CMD		/* Shell command */
 #define SHIM_CMD		/* EFI shim command (or dummy command) */
 #define SYNC_CMD		/* Sync command */
 //#define TIME_CMD		/* Time commands */
 #define USB_CMD			/* USB commands */
-#define VLAN_CMD		/* VLAN commands */
+//#define VLAN_CMD		/* VLAN commands */
 
 /* Commands supported only on systems capable of rebooting */
 #if ! defined ( REBOOT_NULL )
@@ -267,7 +267,7 @@ FILE_SECBOOT ( PERMITTED );
  *
  */
 
-#define VNIC_IPOIB		/* Infiniband IPoIB virtual NICs */
+//#define VNIC_IPOIB		/* Infiniband IPoIB virtual NICs */
 //#define VNIC_XSIGO		/* Infiniband Xsigo virtual NICs */
 
 /*****************************************************************************
@@ -276,7 +276,7 @@ FILE_SECBOOT ( PERMITTED );
  *
  */
 
-#define EAP_METHOD_MD5		/* MD5-Challenge port authentication */
+//#define EAP_METHOD_MD5	/* MD5-Challenge port authentication */
 //#define EAP_METHOD_MSCHAPV2	/* MS-CHAPv2 port authentication */
 
 /*****************************************************************************
@@ -285,9 +285,9 @@ FILE_SECBOOT ( PERMITTED );
  *
  */
 
-#define CRYPTO_80211_WEP	/* WEP encryption (deprecated and insecure!) */
-#define CRYPTO_80211_WPA	/* WPA Personal, with passphrase */
-#define CRYPTO_80211_WPA2	/* Add support for stronger WPA cryptography */
+//#define CRYPTO_80211_WEP	/* WEP encryption (deprecated and insecure!) */
+//#define CRYPTO_80211_WPA	/* WPA Personal, with passphrase */
+//#define CRYPTO_80211_WPA2	/* Add support for stronger WPA cryptography */
 
 /*****************************************************************************
  *
