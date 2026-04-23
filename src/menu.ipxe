@@ -104,12 +104,14 @@ set base-url http://${server-ip}/minitool
 goto boot_winpe_lower
 
 # Strelec WinPE boot function
+# Injects network.cmd (WaitForNetwork + mounts Z: via SMB + original WIM logic)
+# so that all FORX \SSTR\... find files on Z:\SSTR\ just like USB boot
 :boot_strelec
 kernel ${wimboot-url} || goto failed
-initrd --name network.cmd ${base-url}/network.cmd network.cmd || goto failed
+initrd --name network.cmd ${base-url}/${strelec-netcmd} network.cmd || goto failed
 initrd --name bootx64.efi ${base-url}/bootx64.efi bootx64.efi || goto failed
 initrd --name bootmgr.exe ${base-url}/bootmgr64.exe bootmgr.exe || goto failed
-initrd --name BCD ${base-url}/bcd BCD || goto failed 
+initrd --name BCD ${base-url}/bcd BCD || goto failed
 initrd --name boot.sdi ${base-url}/boot.sdi boot.sdi || goto failed
 initrd --name boot.wim ${base-url}/SSTR/${strelec-wim} boot.wim || goto failed
 boot || goto failed
@@ -117,11 +119,13 @@ boot || goto failed
 :strelec10
 set base-url http://${server-ip}/strelec
 set strelec-wim strelec10x64Eng.wim
+set strelec-netcmd network_10.cmd
 goto boot_strelec
 
 :strelec11
 set base-url http://${server-ip}/strelec
 set strelec-wim strelec11x64Eng.wim
+set strelec-netcmd network_11.cmd
 goto boot_strelec
 
 :easyuefi

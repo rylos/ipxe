@@ -1,15 +1,17 @@
 # iPXE Boot Menu - Overview
 
 ## Scopo
-Menu boot di rete personalizzato per recovery e diagnostica. Produce `nas.efi`, un bootloader UEFI x86_64 con menu iPXE embedded.
+Menu boot di rete personalizzato per recovery e diagnostica. Produce `nas.efi` (`snponly.efi`), un bootloader UEFI x86_64 con menu iPXE embedded. Funziona SOLO via network boot (UEFI PXE dal BIOS), non da disco locale.
 
 ## Architettura
 ```
 Client UEFI → DHCP (router OpenWrt) → TFTP nas.efi (router) → HTTP immagini (NAS Synology)
 ```
 - Router OpenWrt (`firewall.ziliani.net`, porta SSH 44222) → TFTP server, ospita `nas.efi` in `/tftp/`
-- NAS Synology (`192.168.1.1`, SSH `ssh -p 2222 marco@home.ziliani.net`) → HTTP server, ospita immagini in `/volume1/web/`
+- NAS Synology (`192.168.1.1`, SSH `ssh -p 2222 nas.lan`) → HTTP server, ospita immagini in `/volume1/web/`
 - Il NAS NON ospita `nas.efi`
+- USB completamente disabilitato in iPXE (`src/config/local/usb.h`) per fix tastiera UEFI
+- Strelec WinPE: usa PXE mode nativo (PecmdPXE.ini) con override iniettati via wimboot
 
 ## Tool disponibili nel menu
 | Categoria | Tool |

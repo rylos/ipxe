@@ -36,5 +36,10 @@ minitool/
 easyuefi/
 hirens/
 strelec/
+  pecmdmain.ini          # Override PXE: forza pecmd.ini (profilo locale)
+  network_10.cmd         # Override PXE per WinPE 10 (WaitForNetwork + retry mount Z: + logica WIM)
+  network_11.cmd         # Override PXE per WinPE 11 (WaitForNetwork + retry mount Z: + logica WIM)
+  bcd, boot.sdi, bootmgr64.exe, bootx64.efi  # File di boot wimboot
+  SSTR/                  # Contenuto ISO (WIM, MInst, DriverPacks, ecc.)
 archlinux/ipxe-arch.efi
 ```
