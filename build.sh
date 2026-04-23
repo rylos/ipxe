@@ -12,8 +12,8 @@
 set -e
 
 cd src
-make -j$(nproc) bin-x86_64-efi/ipxe.efi EMBED=menu.ipxe
-cp bin-x86_64-efi/ipxe.efi ../nas.efi
+make -j$(nproc) bin-x86_64-efi/snponly.efi EMBED=menu.ipxe
+cp bin-x86_64-efi/snponly.efi ../nas.efi
 cd ..
 
 echo ""
