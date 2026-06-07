@@ -11,7 +11,7 @@ Client UEFI → DHCP (router OpenWrt) → TFTP nas.efi (router) → HTTP immagin
 - NAS Synology (`192.168.1.1`, SSH `ssh -p 2222 nas.lan`) → HTTP server, ospita immagini in `/volume1/web/`
 - Il NAS NON ospita `nas.efi`
 - USB completamente disabilitato in iPXE (`src/config/local/usb.h`) per fix tastiera UEFI
-- Strelec WinPE: usa PXE mode nativo (PecmdPXE.ini) con override iniettati via wimboot
+- Strelec WinPE: usa `:boot_strelec` che inietta `network.cmd` (da `network_10.cmd`/`network_11.cmd`) via wimboot per configurare rete e mount SMB prima del boot WinPE
 
 ## Tool disponibili nel menu
 | Categoria | Tool |
