@@ -1,0 +1,26 @@
+#!ipxe
+# Launcher netboot.xyz con tastiera USB funzionante.
+#
+# Usa la NOSTRA build ipxe.efi (USB_KEYBOARD nativo) e carica direttamente
+# lo SCRIPT menu di netboot.xyz via HTTPS, senza passare per il binario
+# ufficiale netboot.xyz.efi (che ha USB_KEYBOARD disabilitato -> tastiera morta).
+
+dhcp || goto retry_dhcp
+goto netbootxyz
+
+:retry_dhcp
+echo DHCP fallito, riprovo...
+dhcp || shell
+
+:netbootxyz
+# netboot.xyz fa un version-check (iseq ${version} 3.x): se non combacia
+# ri-chainloada il PROPRIO binario snponly (senza usbkbd) -> tastiera morta.
+# Il loro stesso binario imposta "set version 3.x" per superarlo: facciamo
+# uguale, cosi' restiamo nel NOSTRO iPXE (con tastiera USB) e il menu
+# netboot.xyz gira qui. Aggiornare il valore se loro bumpano latest_version.
+set version 3.x
+chain --autofree https://boot.netboot.xyz/menu.ipxe || goto failed
+
+:failed
+echo netboot.xyz non raggiungibile, apro la shell iPXE (digita 'exit' per uscire)
+shell

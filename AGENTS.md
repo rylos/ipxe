@@ -46,4 +46,5 @@ scp -P 44222 nas.efi root@firewall.ziliani.net:/tftp/nas.efi   # Deploy to route
 
 ## Notes
 
--
+- edit_file/write_file works inside this workspace
+- Global config.toml updated: sandbox workspace_root = "/" (takes effect next session)

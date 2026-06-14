@@ -1,17 +1,29 @@
 #!/bin/sh
 # Build iPXE EFI con menu personalizzato embedded
 #
-# Output: nas.efi (nella root del progetto)
-# Il file è un bootloader EFI x86_64 con il menu iPXE integrato.
+# Output (nella root del progetto):
+#   - nas.efi          menu NAS completo (EMBED=menu.ipxe)
+#   - netboot.xyz.efi  launcher netboot.xyz (EMBED=netboot-xyz.ipxe)
 #
-# Deployment:\n#   scp -P 44222 nas.efi root@firewall.ziliani.net:/tftp/nas.efi\n#\n# NOTA: snponly.efi funziona solo via network boot (UEFI PXE).\n#       Non può essere avviato da disco locale (systemd-boot).
+# Entrambi: target ipxe.efi (driver NIC nativi) -> bootano sia via UEFI PXE
+# sia da disco locale (systemd-boot). Tastiera USB nativa iPXE
+# (config/local/usb.h, USB_KEYBOARD). Il binario UFFICIALE netboot.xyz.efi
+# NON va usato da disco: ha USB_KEYBOARD disabilitato -> tastiera morta.
+#
+# Deployment:
+#   - OpenWrt/TFTP:  scp nas.efi root@192.168.1.254:/tftp/nas.efi
+#   - Disco locale:  sudo cp nas.efi /boot/nas.efi
+#                    sudo cp netboot.xyz.efi /boot/netboot.xyz.efi
 
 set -e
 
 cd src
-make -j$(nproc) bin-x86_64-efi/snponly.efi EMBED=menu.ipxe
-cp bin-x86_64-efi/snponly.efi ../nas.efi
+make -j$(nproc) bin-x86_64-efi/ipxe.efi EMBED=menu.ipxe
+cp bin-x86_64-efi/ipxe.efi ../nas.efi
+
+make -j$(nproc) bin-x86_64-efi/ipxe.efi EMBED=netboot-xyz.ipxe
+cp bin-x86_64-efi/ipxe.efi ../netboot.xyz.efi
 cd ..
 
 echo ""
-echo "Build completato: nas.efi"
+echo "Build completato: nas.efi + netboot.xyz.efi (ipxe.efi full-driver)"

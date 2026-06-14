@@ -161,7 +161,13 @@ initrd ${base-url}/initrd.lz
 boot || goto failed
 
 :netboot
-chain --autofree http://boot.netboot.xyz/ipxe/netboot.xyz.efi || goto failed
+# Carica lo SCRIPT menu di netboot.xyz, non il binario .efi, per restare
+# nel nostro iPXE (con driver tastiera USB usbkbd).
+# "set version 3.x" supera il loro version-check, che altrimenti
+# ri-chainloaderebbe il binario netboot.xyz-snponly.efi (senza usbkbd ->
+# tastiera morta). E' lo stesso trucco che usa il loro binario ufficiale.
+set version 3.x
+chain --autofree https://boot.netboot.xyz/menu.ipxe || goto failed
 
 :archlinux
 chain --autofree http://${server-ip}/archlinux/ipxe-arch.efi || goto failed
