@@ -831,27 +831,31 @@ void x25519_key ( const struct x25519_value *base,
 }
 
 /**
- * Calculate public key
+ * Share public key
  *
+ * @v exchange		Key exchange algorithm
  * @v private		Private key
  * @v public		Public key to fill in
  */
-static void x25519_public ( const void *private, void *public ) {
+static void x25519_share ( struct exchange_algorithm *exchange __unused,
+			   const void *private, void *public ) {
 
 	/* Calculate public key */
 	x25519_key ( &x25519_generator, private, public );
 }
 
 /**
- * Calculate shared secret
+ * Agree shared secret
  *
+ * @v exchange		Key exchange algorithm
  * @v private		Private key
  * @v partner		Partner public key
  * @v shared		Shared secret to fill in
  * @ret rc		Return status code
  */
-static int x25519_shared ( const void *private, const void *partner,
-			   void *shared ) {
+static int x25519_agree ( struct exchange_algorithm *exchange __unused,
+			  const void *private, const void *partner,
+			  void *shared ) {
 
 	/* Calculate shared secret */
 	x25519_key ( partner, private, shared );
@@ -869,6 +873,6 @@ struct exchange_algorithm x25519_algorithm = {
 	.privsize = sizeof ( struct x25519_value ),
 	.pubsize = sizeof ( struct x25519_value ),
 	.sharedsize = sizeof ( struct x25519_value ),
-	.public = x25519_public,
-	.shared = x25519_shared,
+	.share = x25519_share,
+	.agree = x25519_agree,
 };

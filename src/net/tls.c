@@ -40,6 +40,7 @@ FILE_SECBOOT ( PERMITTED );
 #include <ipxe/md5_sha1.h>
 #include <ipxe/aes.h>
 #include <ipxe/rsa.h>
+#include <ipxe/hkdf.h>
 #include <ipxe/iobuf.h>
 #include <ipxe/xfer.h>
 #include <ipxe/open.h>
@@ -51,6 +52,7 @@ FILE_SECBOOT ( PERMITTED );
 #include <ipxe/validator.h>
 #include <ipxe/job.h>
 #include <ipxe/dhe.h>
+#include <ipxe/ffdhe.h>
 #include <ipxe/tls.h>
 #include <config/crypto.h>
 
@@ -159,10 +161,10 @@ FILE_SECBOOT ( PERMITTED );
 #define EINFO_ENOTSUP_VERSION						\
 	__einfo_uniqify ( EINFO_ENOTSUP, 0x04,				\
 			  "Unsupported protocol version" )
-#define ENOTSUP_CURVE __einfo_error ( EINFO_ENOTSUP_CURVE )
-#define EINFO_ENOTSUP_CURVE						\
+#define ENOTSUP_GROUP __einfo_error ( EINFO_ENOTSUP_GROUP )
+#define EINFO_ENOTSUP_GROUP						\
 	__einfo_uniqify ( EINFO_ENOTSUP, 0x05,				\
-			  "Unsupported elliptic curve" )
+			  "Unsupported key exchange group" )
 #define EPERM_ALERT __einfo_error ( EINFO_EPERM_ALERT )
 #define EINFO_EPERM_ALERT						\
 	__einfo_uniqify ( EINFO_EPERM, 0x01,				\
@@ -195,6 +197,7 @@ FILE_SECBOOT ( PERMITTED );
 /** List of TLS session */
 static LIST_HEAD ( tls_sessions );
 
+static void tls_key_reset ( struct tls_connection *tls );
 static void tls_tx_resume_all ( struct tls_session *session );
 static struct io_buffer * tls_alloc_iob ( struct tls_connection *tls,
 					  size_t len );
@@ -377,39 +380,99 @@ static void tls_close ( struct tls_connection *tls, int rc ) {
 	list_del ( &tls->list );
 	INIT_LIST_HEAD ( &tls->list );
 
+	/* Destroy ephemeral master key */
+	tls_key_reset ( tls );
+
 	/* Resume all other connections, in case we were the lead connection */
 	tls_tx_resume_all ( tls->session );
 }
 
 /******************************************************************************
  *
- * Random number generation
+ * Key schedule
  *
  ******************************************************************************
  */
 
 /**
- * Generate random data
+ * Initialise key schedule
  *
  * @v tls		TLS connection
- * @v data		Buffer to fill
- * @v len		Length of buffer
  * @ret rc		Return status code
  */
-static int tls_generate_random ( struct tls_connection *tls,
-				 void *data, size_t len ) {
+static int tls_key_init ( struct tls_connection *tls ) {
+	struct tls_key_schedule *key = &tls->key;
+	struct digest_algorithm *digest = &tls_ephemeral_algorithm;
+	static const char salt[16] = "ephemeral master";
 	int rc;
 
 	/* Generate random bits with no additional input and without
 	 * prediction resistance
 	 */
-	if ( ( rc = rbg_generate ( NULL, 0, 0, data, len ) ) != 0 ) {
+	if ( ( rc = rbg_generate ( NULL, 0, 0, key->ephemeral,
+				   sizeof ( key->ephemeral ) ) ) != 0 ) {
 		DBGC ( tls, "TLS %p could not generate random data: %s\n",
 		       tls, strerror ( rc ) );
 		return rc;
 	}
 
+	/* Generate ephemeral master secret */
+	hkdf_extract ( digest, salt, sizeof ( salt ), key->ephemeral,
+		       sizeof ( key->ephemeral ), key->ephemeral );
+
 	return 0;
+}
+
+/**
+ * Generate ephemeral secret
+ *
+ * @v tls		TLS connection
+ * @v info		Additional information (or NULL)
+ * @v info_len		Length of additional information
+ * @v out		Ephemeral secret to fill in
+ * @v len		Length of ephemeral secret
+ */
+static void tls_ephemeral ( struct tls_connection *tls, const void *info,
+			    size_t info_len, void *out, size_t len ) {
+	struct tls_key_schedule *key = &tls->key;
+	struct digest_algorithm *digest = &tls_ephemeral_algorithm;
+
+	/* Generate from ephemeral master secret and additional information */
+	hkdf_expand ( digest, key->ephemeral, info, info_len, out, len );
+}
+
+/**
+ * Generate ephemeral secret from label
+ *
+ * @v tls		TLS connection
+ * @v label		Secret label
+ * @v out		Ephemeral secret to fill in
+ * @v len		Length of ephemeral secret
+ */
+static void tls_ephemeral_label ( struct tls_connection *tls,
+				  const char *label, void *out, size_t len ) {
+
+	/* Generate from ephemeral master secret and label */
+	tls_ephemeral ( tls, label, strlen ( label ), out, len );
+	DBGC2 ( tls, "TLS %p ephemeral %s:\n", tls, label );
+	DBGC2_HDA ( tls, 0, out, len );
+}
+
+/**
+ * Reset key schedule
+ *
+ * @v tls		TLS connection
+ */
+static void tls_key_reset ( struct tls_connection *tls ) {
+	struct tls_key_schedule *key = &tls->key;
+
+	/* Derive a new ephemeral master secret */
+	tls_ephemeral_label ( tls, "key reset", key->ephemeral,
+			      sizeof ( key->ephemeral ) );
+
+	/* (Re)generate client random bytes */
+	tls_ephemeral_label ( tls, "client random", &tls->client.random.random,
+			      sizeof ( tls->client.random.random ) );
 }
 
 /**
@@ -988,28 +1051,51 @@ tls_find_signature_hash ( unsigned int code ) {
 
 /******************************************************************************
  *
- * Ephemeral Elliptic Curve Diffie-Hellman key exchange
+ * Ephemeral key exchange
  *
  ******************************************************************************
  */
 
-/** Number of supported named curves */
-#define TLS_NUM_NAMED_CURVES table_num_entries ( TLS_NAMED_CURVES )
+/**
+ * Identify named key exchange group
+ *
+ * @v named_group	Named group specification
+ * @ret group		Named group, or NULL
+ */
+static struct tls_named_group *
+tls_find_named_group ( unsigned int named_group ) {
+	struct tls_named_group *group;
+
+	/* Identify named group */
+	for_each_table_entry ( group, TLS_NAMED_GROUPS ) {
+		if ( group->code && ( group->code == named_group ) )
+			return group;
+	}
+
+	return NULL;
+}
 
 /**
- * Identify named curve
+ * Identify named key exchange group by Diffie-Hellman parameters
  *
- * @v named_curve	Named curve specification
- * @ret curve		Named curve, or NULL
+ * @v dh_p		Prime modulus
+ * @v dh_p_len		Length of prime modulus
+ * @v dh_g		Generator
+ * @v dh_g_len		Length of generator
+ * @ret group		Named group, or NULL
  */
-static struct tls_named_curve *
-tls_find_named_curve ( unsigned int named_curve ) {
-	struct tls_named_curve *curve;
+static struct tls_named_group *
+tls_find_param_group ( const void *dh_p, size_t dh_p_len, const void *dh_g,
+		       size_t dh_g_len ) {
+	struct tls_named_group *group;
 
-	/* Identify named curve */
-	for_each_table_entry ( curve, TLS_NAMED_CURVES ) {
-		if ( curve->code == named_curve )
-			return curve;
+	/* Identify named group by parameters */
+	for_each_table_entry ( group, TLS_NAMED_GROUPS ) {
+		if ( is_ffdhe ( group->exchange ) &&
+		     ffdhe_has_params ( group->exchange, dh_p, dh_p_len,
+					dh_g, dh_g_len ) ) {
+			return group;
+		}
 	}
 
 	return NULL;
@@ -1055,6 +1141,9 @@ static void tls_restart ( struct tls_connection *tls ) {
 	assert ( ! is_pending ( &tls->client.negotiation ) );
 	assert ( ! is_pending ( &tls->server.negotiation ) );
 	assert ( ! is_pending ( &tls->server.validation ) );
+
+	/* Reset key schedule */
+	tls_key_reset ( tls );
 
 	/* (Re)start negotiation */
 	tls->tx.pending = TLS_TX_CLIENT_HELLO;
@@ -1139,9 +1228,9 @@ static int tls_client_hello ( struct tls_connection *tls,
 		uint16_t len;
 		struct {
 			uint16_t len;
-			uint16_t code[TLS_NUM_NAMED_CURVES];
+			uint16_t code[TLS_NUM_NAMED_GROUPS];
 		} __attribute__ (( packed )) data;
-	} __attribute__ (( packed )) *named_curve_ext;
+	} __attribute__ (( packed )) *named_group_ext;
 	struct {
 		uint16_t type;
 		uint16_t len;
@@ -1153,8 +1242,8 @@ static int tls_client_hello ( struct tls_connection *tls,
 		typeof ( *renegotiation_info_ext ) renegotiation_info;
 		typeof ( *session_ticket_ext ) session_ticket;
 		typeof ( *extended_master_secret_ext ) extended_master_secret;
-		typeof ( *named_curve_ext )
-			named_curve[TLS_NUM_NAMED_CURVES ? 1 : 0];
+		typeof ( *named_group_ext )
+			named_group[TLS_NUM_NAMED_GROUPS ? 1 : 0];
 	} __attribute__ (( packed )) *extensions;
 	struct {
 		uint32_t type_length;
@@ -1171,7 +1260,7 @@ static int tls_client_hello ( struct tls_connection *tls,
 	} __attribute__ (( packed )) hello;
 	struct tls_cipher_suite *suite;
 	struct tls_signature_hash_algorithm *sighash;
-	struct tls_named_curve *curve;
+	struct tls_named_group *group;
 	unsigned int i;
 
 	/* Construct record */
@@ -1244,16 +1333,19 @@ static int tls_client_hello ( struct tls_connection *tls,
 		= htons ( TLS_EXTENDED_MASTER_SECRET );
 	extended_master_secret_ext->len = 0;
 
-	/* Construct named curves extension, if applicable */
-	if ( sizeof ( extensions->named_curve ) ) {
-		named_curve_ext = &extensions->named_curve[0];
-		named_curve_ext->type = htons ( TLS_NAMED_CURVE );
-		named_curve_ext->len
-			= htons ( sizeof ( named_curve_ext->data ) );
-		named_curve_ext->data.len
-			= htons ( sizeof ( named_curve_ext->data.code ) );
-		i = 0 ; for_each_table_entry ( curve, TLS_NAMED_CURVES )
-			named_curve_ext->data.code[i++] = curve->code;
+	/* Construct named groups extension, if applicable */
+	if ( sizeof ( extensions->named_group ) ) {
+		named_group_ext = &extensions->named_group[0];
+		named_group_ext->type = htons ( TLS_NAMED_GROUP );
+		named_group_ext->len
+			= htons ( sizeof ( named_group_ext->data ) );
+		named_group_ext->data.len
+			= htons ( sizeof ( named_group_ext->data.code ) );
+		i = 0 ; for_each_table_entry ( group, TLS_NAMED_GROUPS ) {
+			if ( group->code )
+				named_group_ext->data.code[i++] = group->code;
+		}
+		assert ( i == TLS_NUM_NAMED_GROUPS );
 	}
 
 	return action ( tls, &hello, sizeof ( hello ) );
@@ -1349,10 +1441,9 @@ static int tls_send_client_key_exchange_pubkey ( struct tls_connection *tls ) {
 
 	/* Generate pre-master secret */
 	pre_master_secret.version = htons ( TLS_VERSION_MAX );
-	if ( ( rc = tls_generate_random ( tls, &pre_master_secret.random,
-			  ( sizeof ( pre_master_secret.random ) ) ) ) != 0 ) {
-		goto err_random;
-	}
+	tls_ephemeral_label ( tls, "classic pre-master",
+			      &pre_master_secret.random,
+			      sizeof ( pre_master_secret.random ) );
 
 	/* Encrypt pre-master secret using server's public key */
 	if ( ( rc = pubkey_encrypt ( pubkey, &tls->server.key, &cursor,
@@ -1393,7 +1484,6 @@ static int tls_send_client_key_exchange_pubkey ( struct tls_connection *tls ) {
 	tls_generate_master_secret ( tls, &pre_master_secret,
 				     sizeof ( pre_master_secret ) );
 
- err_random:
  err_encrypt:
  err_prepend:
  err_send:
@@ -1507,11 +1597,16 @@ static int tls_verify_dh_params ( struct tls_connection *tls,
  * @ret rc		Return status code
  */
 static int tls_send_client_key_exchange_dhe ( struct tls_connection *tls ) {
+	struct tls_named_group *group;
+	struct exchange_algorithm *exchange;
 	uint8_t private[ sizeof ( tls->client.random.random ) ];
 	const struct {
 		uint16_t len;
 		uint8_t data[0];
 	} __attribute__ (( packed )) *dh_val[3];
+	typeof ( dh_val[0] ) dh_p;
+	typeof ( dh_val[1] ) dh_g;
+	typeof ( dh_val[2] ) dh_ys;
 	const void *data;
 	size_t remaining;
 	size_t frag_len;
@@ -1544,17 +1639,29 @@ static int tls_send_client_key_exchange_dhe ( struct tls_connection *tls ) {
 	if ( ( rc = tls_verify_dh_params ( tls, param_len ) ) != 0 )
 		goto err_verify;
 
-	/* Generate Diffie-Hellman private key */
-	if ( ( rc = tls_generate_random ( tls, private,
-					  sizeof ( private ) ) ) != 0 ) {
-		goto err_random;
+	/* Identify named group */
+	dh_p = dh_val[0];
+	dh_g = dh_val[1];
+	dh_ys = dh_val[2];
+	group = tls_find_param_group ( dh_p->data, ntohs ( dh_p->len ),
+				       dh_g->data, ntohs ( dh_g->len ) );
+	if ( ! group ) {
+		DBGC ( tls, "TLS %p unsupported %d-bit group:\n",
+		       tls, ( 8 * ntohs ( dh_p->len ) ) );
+		DBGC_HDA ( tls, 0, tls->server.exchange,
+			   tls->server.exchange_len );
+		rc = -ENOTSUP_GROUP;
+		goto err_group;
 	}
+	exchange = group->exchange;
+	DBGC ( tls, "TLS %p using named group %s\n", tls, exchange->name );
+
+	/* Generate Diffie-Hellman private key */
+	tls_ephemeral_label ( tls, exchange->name, private,
+			      sizeof ( private ) );
 
 	/* Construct pre-master secret and ClientKeyExchange record */
 	{
-		typeof ( dh_val[0] ) dh_p = dh_val[0];
-		typeof ( dh_val[1] ) dh_g = dh_val[1];
-		typeof ( dh_val[2] ) dh_ys = dh_val[2];
 		size_t len = ntohs ( dh_p->len );
 		struct {
 			uint32_t type_length;
@@ -1613,7 +1720,7 @@ static int tls_send_client_key_exchange_dhe ( struct tls_connection *tls ) {
 		free ( dynamic );
 	}
  err_alloc:
- err_random:
+ err_group:
  err_verify:
  err_header:
 	return rc;
@@ -1632,11 +1739,11 @@ struct tls_key_exchange_algorithm tls_dhe_exchange_algorithm = {
  * @ret rc		Return status code
  */
 static int tls_send_client_key_exchange_ecdhe ( struct tls_connection *tls ) {
-	struct tls_named_curve *curve;
+	struct tls_named_group *group;
 	struct exchange_algorithm *exchange;
 	const struct {
 		uint8_t curve_type;
-		uint16_t named_curve;
+		uint16_t named_group;
 		uint8_t public_len;
 		uint8_t public[0];
 	} __attribute__ (( packed )) *ecdh;
@@ -1663,27 +1770,27 @@ static int tls_send_client_key_exchange_ecdhe ( struct tls_connection *tls ) {
 	if ( ( rc = tls_verify_dh_params ( tls, param_len ) ) != 0 )
 		return rc;
 
-	/* Identify named curve */
+	/* Identify named group */
 	if ( ecdh->curve_type != TLS_NAMED_CURVE_TYPE ) {
 		DBGC ( tls, "TLS %p unsupported curve type %d\n",
 		       tls, ecdh->curve_type );
 		DBGC_HDA ( tls, 0, tls->server.exchange,
 			   tls->server.exchange_len );
-		return -ENOTSUP_CURVE;
+		return -ENOTSUP_GROUP;
 	}
-	curve = tls_find_named_curve ( ecdh->named_curve );
-	if ( ! curve ) {
-		DBGC ( tls, "TLS %p unsupported named curve %d\n",
-		       tls, ntohs ( ecdh->named_curve ) );
+	group = tls_find_named_group ( ecdh->named_group );
+	if ( ! group ) {
+		DBGC ( tls, "TLS %p unsupported named group %d\n",
+		       tls, ntohs ( ecdh->named_group ) );
 		DBGC_HDA ( tls, 0, tls->server.exchange,
 			   tls->server.exchange_len );
-		return -ENOTSUP_CURVE;
+		return -ENOTSUP_GROUP;
 	}
-	exchange = curve->exchange;
+	exchange = group->exchange;
 	privsize = exchange->privsize;
 	pubsize = exchange->pubsize;
 	sharedsize = exchange->sharedsize;
-	DBGC ( tls, "TLS %p using named curve %s\n", tls, exchange->name );
+	DBGC ( tls, "TLS %p using named group %s\n", tls, exchange->name );
 
 	/* Check key length */
 	if ( ecdh->public_len != pubsize ) {
@@ -1704,10 +1811,8 @@ static int tls_send_client_key_exchange_ecdhe ( struct tls_connection *tls ) {
 		} __attribute__ (( packed )) key_xchg;
 
 		/* Generate ephemeral private key */
-		if ( ( rc = tls_generate_random ( tls, private,
-						  sizeof ( private ) ) ) != 0){
-			return rc;
-		}
+		tls_ephemeral_label ( tls, exchange->name, private,
+				      sizeof ( private ) );
 
 		/* Generate Client Key Exchange record */
 		key_xchg.type_length =
@@ -1715,7 +1820,7 @@ static int tls_send_client_key_exchange_ecdhe ( struct tls_connection *tls ) {
 			  htonl ( sizeof ( key_xchg ) -
 				  sizeof ( key_xchg.type_length ) ) );
 		key_xchg.public_len = sizeof ( key_xchg.public );
-		exchange_public ( exchange, private, key_xchg.public );
+		exchange_share ( exchange, private, key_xchg.public );
 
 		/* Transmit Client Key Exchange record */
 		if ( ( rc = tls_send_handshake ( tls, &key_xchg,
@@ -1724,8 +1829,8 @@ static int tls_send_client_key_exchange_ecdhe ( struct tls_connection *tls ) {
 		}
 
 		/* Generate pre-master secret */
-		if ( ( rc = exchange_shared ( exchange, private, ecdh->public,
-					      pre_master_secret ) ) != 0 ) {
+		if ( ( rc = exchange_agree ( exchange, private, ecdh->public,
+					     pre_master_secret ) ) != 0 ) {
 			DBGC ( tls, "TLS %p could not exchange keys: %s\n",
 			       tls, strerror ( rc ) );
 			return rc;
@@ -3036,20 +3141,24 @@ static int tls_send_record ( struct tls_connection *tls, unsigned int type,
 		if ( record_len > TLS_TX_BUFSIZE )
 			record_len = TLS_TX_BUFSIZE;
 
-		/* Construct and set initialisation vector */
-		memcpy ( iv.fixed, cipherspec->fixed_iv, sizeof ( iv.fixed ) );
-		if ( ( rc = tls_generate_random ( tls, iv.rec,
-						  sizeof ( iv.rec ) ) ) != 0 ) {
-			goto err_random;
-		}
-		cipher_setiv ( cipher, cipherspec->cipher_ctx, &iv,
-			       sizeof ( iv ) );
-
-		/* Construct and process authentication data */
+		/* Construct authentication header */
 		authhdr.seq = cpu_to_be64 ( tls->tx.seq );
 		authhdr.header.type = type;
 		authhdr.header.version = htons ( tls->version );
 		authhdr.header.length = htons ( record_len );
+
+		/* Construct and set initialisation vector */
+		memcpy ( iv.fixed, cipherspec->fixed_iv, sizeof ( iv.fixed ) );
+		tls_ephemeral ( tls, &authhdr, sizeof ( authhdr ), iv.rec,
+				sizeof ( iv.rec ) );
+		if ( ( rc = cipher_setiv ( cipher, cipherspec->cipher_ctx, &iv,
+					   sizeof ( iv ) ) ) != 0 ) {
+			DBGC ( tls, "TLS %p could not set TX IV: %s\n",
+			       tls, strerror ( rc ) );
+			goto err_setiv;
+		}
+
+		/* Process authentication data */
 		if ( suite->mac_len ) {
 			tls_hmac ( cipherspec, &authhdr, plaintext, record_len,
 				   mac );
@@ -3124,7 +3233,7 @@ static int tls_send_record ( struct tls_connection *tls, unsigned int type,
 	return 0;
 
  err_deliver:
- err_random:
+ err_setiv:
 	free_iob ( iobuf );
 	return rc;
 }
@@ -3257,7 +3366,12 @@ static int tls_new_ciphertext ( struct tls_connection *tls,
 	authhdr.header.length = htons ( len );
 
 	/* Set initialisation vector */
-	cipher_setiv ( cipher, cipherspec->cipher_ctx, &iv, sizeof ( iv ) );
+	if ( ( rc = cipher_setiv ( cipher, cipherspec->cipher_ctx, &iv,
+				   sizeof ( iv ) ) ) != 0 ) {
+		DBGC ( tls, "TLS %p could not set RX IV: %s\n",
+		       tls, strerror ( rc ) );
+		return rc;
+	}
 
 	/* Process authentication data, if applicable */
 	if ( is_auth_cipher ( cipher ) ) {
@@ -3935,10 +4049,8 @@ int add_tls ( struct interface *xfer, const char *name,
 	iob_populate ( &tls->rx.iobuf, &tls->rx.header, 0,
 		       sizeof ( tls->rx.header ) );
 	INIT_LIST_HEAD ( &tls->rx.data );
-	if ( ( rc = tls_generate_random ( tls, &tls->client.random.random,
-			  ( sizeof ( tls->client.random.random ) ) ) ) != 0 ) {
-		goto err_random;
-	}
+	if ( ( rc = tls_key_init ( tls ) ) != 0 )
+		goto err_key;
 	if ( ( rc = tls_session ( tls, name ) ) != 0 )
 		goto err_session;
 	list_add_tail ( &tls->list, &tls->session->conn );
@@ -3952,7 +4064,7 @@ int add_tls ( struct interface *xfer, const char *name,
 	return 0;
 
  err_session:
- err_random:
+ err_key:
 	ref_put ( &tls->refcnt );
  err_alloc:
 	return rc;
