@@ -26,7 +26,7 @@ item --key 3 strelec11   Sergei Strelec WinPE 11
 item --key p minitool    MiniTool Partition Wizard
 item --key e easyuefi    EasyUEFI Enterprise
 item --gap --            ------------------------- Network Boot & Install --------------------------
-item --key a archlinux   Arch Linux (latest)
+item --key i archiso     Arch Linux ISO (NAS)
 item --key n netboot     netboot.xyz
 item --gap --            ------------------------- Utility -----------------------------------------
 item --key c config      Configure settings
@@ -169,6 +169,14 @@ boot || goto failed
 set version 3.x
 chain --autofree https://boot.netboot.xyz/menu.ipxe || goto failed
 
-:archlinux
-chain --autofree http://${server-ip}/archlinux/ipxe-arch.efi || goto failed
-goto start
+# Arch Linux ISO locale dal NAS (archiso via HTTP).
+# NB: il netboot Arch online si fa da netboot.xyz (rimossa la vecchia voce
+# archlinux/ipxe-arch.efi e la relativa cartella sul NAS).
+# Voce GENERICA: i percorsi/nomi file sono fissi tra le release archiso,
+# quindi per aggiornare basta sovrascrivere i file in /volume1/web/archiso/
+# sul NAS, senza ricompilare nas.efi. Versione corrente in archiso/VERSION.txt
+:archiso
+set base-url http://${server-ip}/archiso
+kernel ${base-url}/arch/boot/x86_64/vmlinuz-linux initrd=initramfs-linux.img archiso_http_srv=${base-url}/ archisobasedir=arch checksum ip=dhcp net.ifnames=0 BOOTIF=01-${net0/mac:hexhyp}
+initrd ${base-url}/arch/boot/x86_64/initramfs-linux.img
+boot || goto failed
