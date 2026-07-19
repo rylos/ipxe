@@ -48,9 +48,6 @@ struct tls_header {
 /** TLS version 1.2 */
 #define TLS_VERSION_TLS_1_2 0x0303
 
-/** Maximum supported TLS version */
-#define TLS_VERSION_MAX TLS_VERSION_TLS_1_2
-
 /** Change cipher content type */
 #define TLS_TYPE_CHANGE_CIPHER 20
 
@@ -200,12 +197,22 @@ struct tls_key_exchange_algorithm {
 	/** Algorithm name */
 	const char *name;
 	/**
+	 * Receive new Server Key Exchange record using ECDHE key exchange
+	 *
+	 * @v tls		TLS connection
+	 * @v data		Server Key Exchange handshake record
+	 * @v len		Length of Server Key Exchange handshake record
+	 * @ret rc		Return status code
+	 */
+	int ( * server ) ( struct tls_connection *tls, const void *data,
+			   size_t len );
+	/**
 	 * Transmit Client Key Exchange record
 	 *
 	 * @v tls		TLS connection
 	 * @ret rc		Return status code
 	 */
-	int ( * exchange ) ( struct tls_connection *tls );
+	int ( * client ) ( struct tls_connection *tls );
 };
 
 /** A TLS cipher suite */
@@ -335,6 +342,8 @@ struct tls_session {
 	/** Private key */
 	struct private_key *key;
 
+	/** Server certificate */
+	struct x509_certificate *cert;
 	/** Session ID */
 	uint8_t id[32];
 	/** Length of session ID */
@@ -343,8 +352,10 @@ struct tls_session {
 	void *ticket;
 	/** Length of session ticket */
 	size_t ticket_len;
-	/** Master secret */
-	uint8_t master_secret[48];
+	/** Resumption master secret */
+	uint8_t resumption_master_secret[48];
+	/** Length of resumption master secret */
+	size_t resumption_master_secret_len;
 	/** Extended master secret flag */
 	int extended_master_secret;
 
@@ -357,7 +368,98 @@ struct tls_session {
 
 /** TLS key schedule */
 struct tls_key_schedule {
-	/** Ephemeral secret pseudorandom key */
+	/** Digest algorithm
+	 *
+	 * This is the digest algorithm specified by the cipher suite.
+	 * It is used to construct the handshake running transcript
+	 * digest value, and as the HMAC digest algorithm for key
+	 * derivation.
+	 */
+	struct digest_algorithm *digest;
+	/** Named key exchange group */
+	struct tls_named_group *group;
+	/** Schedule holds secret key material
+	 *
+	 * This flag is set when shared secret key material is
+	 * introduced into the schedule (e.g. when the TLS pre-master
+	 * secret is calculated, or when a session is resumed).
+	 *
+	 * If this flag has not been set, then the key schedule
+	 * contains only public information.
+	 *
+	 * This flag must be cleared whenever the key schedule is
+	 * reset.
+	 */
+	int keyed;
+	/** Server identity to which the schedule has been bound (if any)
+	 *
+	 * This reference to the server certificate is set when the
+	 * shared secret key material has been bound to the identity
+	 * represented by the server's certificate.  It represents the
+	 * successful delegation of authority from the server's
+	 * long-term authentication key to the per-connection shared
+	 * secret key material for the purpose of authenticating the
+	 * connection via a successfully verified server Finished
+	 * message.
+	 *
+	 * Note that this reference may be set before the server
+	 * certificate has been validated.  The validation of the
+	 * server certificate's chain is independent from the binding
+	 * of the key schedule to the server certificate.
+	 *
+	 * The binding may take place in several different ways,
+	 * depending on the protocol version and options:
+	 *
+	 *   - For classic RSA key transport, the binding occurs when
+	 *     the encrypted ClientKeyExchange message is sent and
+	 *     incorporated into the handshake digest.  A subsequent
+	 *     successfully verified server Finished message
+	 *     simultaneously proves knowledge of the certificate's
+	 *     private key and agreement on the shared secret key
+	 *     material.
+	 *
+	 *   - For ephemeral key exchange via ServerKeyExchange, the
+	 *     binding occurs when the signature over the DH
+	 *     parameters within ServerKeyExchange is verified against
+	 *     the certificate's public key.  That signature
+	 *     represents the server's intention to delegate authority
+	 *     to any shared secret constructed from the signed DH
+	 *     parameters.
+	 *
+	 *   - For ephemeral key exchange via ClientHello/ServerHello,
+	 *     the binding occurs when the signature over the
+	 *     handshake digest within the server CertificateVerify is
+	 *     verified against the certificate's public key.  The
+	 *     handshake digest incorporates the ephemeral key
+	 *     exchange and so the signature represents the server's
+	 *     intention to delegate authority to any shared secret
+	 *     constructed from the indirectly signed DH parameters.
+	 *
+	 *   - For session resumption, the binding occurs when the key
+	 *     schedule is resumed from the session secret.  The
+	 *     server's choice to accept the resumption represents its
+	 *     intention to delegate authority to the shared secret
+	 *     derived from the session secret.
+	 *
+	 * This reference may not be set unless the "keyed" flag has
+	 * already been set, and must be cleared whenever the "keyed"
+	 * flag is cleared.
+	 *
+	 * This reference must be cleared whenever the server identity
+	 * represented by the current certificate changes (e.g. when a
+	 * new certificate chain is provided), or whenever the key
+	 * derivation function master secret is overwritten with a
+	 * value that is not cryptographically derived from its
+	 * current value.
+	 */
+	struct x509_certificate *bound;
+	/** Dynamically-allocated storage */
+	void *dynamic;
+	/** Handshake running transcript digest context */
+	void *handshake;
+	/** Key derivation function master secret */
+	void *kdf;
+	/** Ephemeral master secret */
 	uint8_t ephemeral[SHA256_DIGEST_SIZE];
 };
 
@@ -407,18 +509,10 @@ struct tls_client {
 struct tls_server {
 	/** Random bytes */
 	uint8_t random[32];
-	/** Server Key Exchange record (if any) */
-	void *exchange;
-	/** Server Key Exchange record length */
-	size_t exchange_len;
 	/** Root of trust */
 	struct x509_root *root;
 	/** Certificate chain */
 	struct x509_chain *chain;
-	/** Public key algorithm (within server certificate) */
-	struct asn1_algorithm *algorithm;
-	/** Public key (within server certificate) */
-	struct asn1_cursor key;
 	/** Certificate validator */
 	struct interface validator;
 	/** Certificate validation pending operation */
@@ -452,12 +546,6 @@ struct tls_connection {
 
 	/** Protocol version */
 	uint16_t version;
-	/** Master secret */
-	uint8_t master_secret[48];
-	/** Digest algorithm used for handshake verification */
-	struct digest_algorithm *handshake_digest;
-	/** Digest algorithm context used for handshake verification */
-	uint8_t *handshake_ctx;
 	/** Secure renegotiation flag */
 	int secure_renegotiation;
 	/** Extended master secret flag */
