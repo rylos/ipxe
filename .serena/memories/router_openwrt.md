@@ -13,8 +13,23 @@ Root TFTP: `/tftp/`
 ```
 nas.efi        # iPXE UEFI bootloader con menu embedded (1.1M)
 undionly.kpxe  # iPXE BIOS chainloader (68K)
-menu.ipxe      # menu standalone legacy (5K, non più usato attivamente)
+menu.ipxe      # menu standalone per client BIOS legacy — VA TENUTO ALLINEATO
 ```
+
+⚠️ `/tftp/menu.ipxe` NON è "non più usato": è il menu servito ai client **BIOS
+legacy** (`dhcp-boot=tag:bios,tag:ipxe,menu.ipxe`). NON è embedded in nessun
+binario, quindi `./build.sh` non lo aggiorna: va copiato a mano da `src/menu.ipxe`
+a OGNI modifica del menu, altrimenti i client BIOS restano indietro.
+
+Trovato disallineato il 2026-08-03 (fermo al 22 giugno) con voci **rotte**:
+`:archlinux` puntava a `/archlinux/ipxe-arch.efi` (cartella rimossa dal NAS),
+`:netboot` caricava il binario .efi invece dello script (tastiera USB morta),
+`:strelec` usava `network.cmd` invece di `${strelec-netcmd}`.
+Backup del vecchio: `/tftp/menu.ipxe.bak-2026-08-03`.
+
+NB: `undionly.kpxe` è del 2025-03 e potrebbe non avere TLS compilato → la voce
+`:netboot` (che ora usa `https://boot.netboot.xyz/menu.ipxe`) può fallire su BIOS.
+Le voci EFI-only (wimboot/`bootx64.efi`) non funzionano da BIOS a prescindere.
 
 ## Configurazione dnsmasq PXE
 ```

@@ -6,16 +6,28 @@ Fork of [ipxe/ipxe](https://github.com/ipxe/ipxe) customized with an embedded bo
 
 - **Upstream**: `ipxe:master` (merged into local `master`)
 - **Origin**: `git@github.com:rylos/ipxe.git`
-- **Build output**: `nas.efi` (x86_64 EFI, snponly.efi with embedded `menu.ipxe`)
+- **Build output**: `nas.efi` (x86_64 EFI, `ipxe.efi` **full-driver** with embedded `menu.ipxe` — native NIC drivers, so it boots both via UEFI PXE and from local disk via systemd-boot. NOT `snponly.efi`)
 - **Deploy target**: OpenWrt router at `firewall.ziliani.net:/tftp/nas.efi`
 - **Architecture**: Client UEFI PXE → DHCP (OpenWrt) → TFTP `nas.efi` → HTTP boot images from NAS (192.168.1.1:`/volume1/web/`)
 
 ## Commands
 
 ```bash
-./build.sh                        # Build nas.efi (make -j$(nproc) bin-x86_64-efi/snponly.efi EMBED=menu.ipxe)
+./build.sh                        # Build nas.efi + netboot.xyz.efi
+                                  # (make -j$(nproc) NO_WERROR=1 bin-x86_64-efi/ipxe.efi EMBED=menu.ipxe)
 scp -P 44222 nas.efi root@firewall.ziliani.net:/tftp/nas.efi   # Deploy to router
+sudo cp nas.efi /boot/nas.efi                                  # Deploy to local disk (systemd-boot)
+scp src/menu.ipxe root@192.168.1.254:/tftp/menu.ipxe           # Deploy standalone menu (BIOS legacy)
 ```
+
+**Three deploy targets, not two.** `/tftp/menu.ipxe` is the standalone menu served to
+**BIOS legacy** clients (`dhcp-boot=tag:bios,tag:ipxe,menu.ipxe`). It is NOT embedded in
+any binary, so `build.sh` does not update it — copy it by hand on every menu change.
+It was found 2 months stale (with broken entries) on 2026-08-03.
+
+**`NO_WERROR=1` is required** with binutils >= 2.44 / GCC >= 15: the assembler warns about
+`.note.GNU-stack` in upstream `.S` prefix files and iPXE sets `ASFLAGS += --fatal-warnings`,
+which aborts the build. Verified on binutils 2.47 + GCC 16.1.1 (2026-08).
 
 ## Architecture
 

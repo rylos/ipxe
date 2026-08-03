@@ -12,7 +12,7 @@
 ```
 Dipendenze build: GCC, GNU Make, Perl, OpenSSL.
 
-## Deploy — DUE destinazioni (allinearle sempre entrambe!)
+## Deploy — TRE destinazioni (allinearle sempre tutte e tre!)
 ```bash
 # 1) Router OpenWrt (TFTP) — boot via UEFI PXE. Da LAN:
 scp nas.efi root@192.168.1.254:/tftp/nas.efi
@@ -24,9 +24,15 @@ sudo cp nas.efi /boot/nas.efi
 sudo cp netboot.xyz.efi /boot/netboot.xyz.efi   # se cambiato
 # Voce systemd-boot: /boot/loader/entries/nas-ipxe.conf (efi /nas.efi)
 
-# 3) (verifica) confronto hash tra build, router e /boot:
+# 3) Menu standalone per client BIOS legacy — NON è embedded, build.sh NON lo tocca:
+scp src/menu.ipxe root@192.168.1.254:/tftp/menu.ipxe
+
+# 4) (verifica) confronto hash su tutte e tre:
 sha256sum nas.efi; ssh root@192.168.1.254 'sha256sum /tftp/nas.efi'; sudo sha256sum /boot/nas.efi
+md5sum src/menu.ipxe; ssh root@192.168.1.254 'md5sum /tftp/menu.ipxe'
 ```
+⚠️ La destinazione 3 è quella che si dimentica: `/tftp/menu.ipxe` è servito ai client
+BIOS legacy ed era rimasto indietro di 2 mesi (scoperto 2026-08-03, con voci rotte).
 
 ## NAS Synology — immagini in /volume1/web/
 ```bash

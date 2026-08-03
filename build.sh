@@ -15,13 +15,17 @@
 #   - Disco locale:  sudo cp nas.efi /boot/nas.efi
 #                    sudo cp netboot.xyz.efi /boot/netboot.xyz.efi
 
+# NO_WERROR=1 e' necessario con binutils >= 2.44 / GCC >= 15: l'assembler emette
+# warning su .note.GNU-stack nei .S upstream e iPXE usa ASFLAGS += --fatal-warnings,
+# che fa fallire la build. Verificato su binutils 2.47 + GCC 16.1.1 (2026-08).
+
 set -e
 
 cd src
-make -j$(nproc) bin-x86_64-efi/ipxe.efi EMBED=menu.ipxe
+make -j$(nproc) NO_WERROR=1 bin-x86_64-efi/ipxe.efi EMBED=menu.ipxe
 cp bin-x86_64-efi/ipxe.efi ../nas.efi
 
-make -j$(nproc) bin-x86_64-efi/ipxe.efi EMBED=netboot-xyz.ipxe
+make -j$(nproc) NO_WERROR=1 bin-x86_64-efi/ipxe.efi EMBED=netboot-xyz.ipxe
 cp bin-x86_64-efi/ipxe.efi ../netboot.xyz.efi
 cd ..
 

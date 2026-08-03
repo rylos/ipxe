@@ -11,10 +11,22 @@ set server-ip 192.168.1.1
 set nas-ip ${server-ip}
 set wimboot-url http://${server-ip}/wimboot
 
+# Console a 1024x768 -> 128x48 caratteri (invece degli 80x25 di default EFI).
+# Serve perche' il menu ha 21 righe (17 voci + 4 separatori) + titolo + indicatore
+# di scroll = 23, mentre l'80x25 ne lascia ~20: "Exit iPXE" finiva in seconda pagina.
+# Il "||" finale rende il comando best-effort:
+#   - se il firmware rifiuta la modalita' video, si resta in 80x25 come prima
+#   - sui client BIOS legacy (undionly.kpxe) il comando non esiste proprio, perche'
+#     config/general.h fa #undef CONSOLE_CMD per PLATFORM_pcbios -> errore ignorato
+# Richiede CONSOLE_FRAMEBUFFER (attivo in config/console.h) e console_cmd.o (linkato
+# solo nel build EFI).
+console --x 1024 --y 768 ||
+
 :start
 menu iPXE Boot Menu
 item --gap --            ------------------------- Backup & Recovery -------------------------------
 item --key k clonezilla  Clonezilla Live
+item --key j clonezilla_jumbo  Clonezilla Live (jumbo MTU 9000)
 item --key r rescuezilla Rescuezilla
 item --key m macrium     Macrium Recovery Media
 item --key s synomedia   Synology Recovery Media
@@ -148,9 +160,30 @@ initrd ${base-url}/bootmgr.exe bootmgr.exe
 initrd ${base-url}/sources/boot.wim boot.wim
 boot || goto failed
 
+# net.ifnames=0 -> nomi interfaccia legacy (eth0) anche qui, per coerenza con
+# :clonezilla_jumbo ed allineamento al default ufficiale Clonezilla live.
+# Nessuna funzionalita' dipende dal nome (il mount NFS usa l'IP): e' solo
+# prevedibilita' quando si diagnostica da Enter_shell. Verificato 2026-08-03:
+# senza questo flag l'interfaccia era enp4s0.
 :clonezilla
 set base-url http://${server-ip}/clonezilla
-kernel ${base-url}/vmlinuz initrd=initrd.img boot=live username=user union=overlay config components quiet noswap edd=on nomodeset nodmraid keyboard-layouts=it locales=it_IT.UTF-8 fetch=${base-url}/filesystem.squashfs ocs_numlk=on ocs_daemonon="ssh" ocs_prerun="mount -t nfs ${nas-ip}:/volume2/backup /home/partimag"
+kernel ${base-url}/vmlinuz initrd=initrd.img boot=live username=user union=overlay config components quiet noswap edd=on nomodeset net.ifnames=0 nodmraid keyboard-layouts=it locales=it_IT.UTF-8 fetch=${base-url}/filesystem.squashfs ocs_numlk=on ocs_daemonon="ssh" ocs_prerun="mount -t nfs ${nas-ip}:/volume2/backup /home/partimag"
+initrd ${base-url}/initrd.img
+boot || goto failed
+
+# Variante jumbo frame: identica a :clonezilla ma alza la MTU a 9000 prima del
+# mount NFS, per sfruttare i jumbo sul link 2.5G verso il NAS (~5% in piu').
+#   - net.ifnames=0  -> nomi interfaccia legacy, garantisce "eth0" (e' anche il
+#                       default ufficiale di Clonezilla live, assente in :clonezilla)
+#   - ocs_prerun     -> alza la MTU; se fallisce, ocs_prerun1 monta comunque a 1500
+#   - ocs_prerun1    -> mount NFS della destinazione (identico a :clonezilla)
+# ATTENZIONE: usare SOLO su macchine dove i jumbo sono verificati end-to-end
+#   (da shell Clonezilla: ip link set dev eth0 mtu 9000 && ping -M do -s 8972 192.168.1.1)
+# Se la NIC accetta 9000 ma lo switch/porta non li inoltra, il mount NFS si pianta.
+# Per il resto usare la voce :clonezilla standard (MTU 1500, sempre sicura).
+:clonezilla_jumbo
+set base-url http://${server-ip}/clonezilla
+kernel ${base-url}/vmlinuz initrd=initrd.img boot=live username=user union=overlay config components quiet noswap edd=on nomodeset net.ifnames=0 nodmraid keyboard-layouts=it locales=it_IT.UTF-8 fetch=${base-url}/filesystem.squashfs ocs_numlk=on ocs_daemonon="ssh" ocs_prerun="ip link set dev eth0 mtu 9000" ocs_prerun1="mount -t nfs ${nas-ip}:/volume2/backup /home/partimag"
 initrd ${base-url}/initrd.img
 boot || goto failed
 
