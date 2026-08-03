@@ -38,48 +38,58 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 /** "Hello world" */
 ARCHIVE_TEST ( hello_world, &mime_image_type, "hw.mime", NULL, "hw",
-	ARCHIVE ( "Content-Type: text/x-ipxe; charset=\"utf-8\"\r\n"
-		  "MIME-Version: 1.0\r\n"
-		  "Content-Transfer-Encoding: base64\r\n"
-		  "Content-Disposition: attachment; filename=\"hw.ipxe\"\r\n"
-		  "\r\n"
-		  "IyFpcHhlCgplY2hvIEhlbGxvIHdvcmxkCnNoZWxsCg==\r\n" ),
-	EXPECTED ( "#!ipxe\n"
+	TEXTFILE ( "Content-Type: text/x-ipxe; charset=\"utf-8\"\r\n"
+		   "MIME-Version: 1.0\r\n"
+		   "Content-Transfer-Encoding: base64\r\n"
+		   "Content-Disposition: attachment; filename=\"hw.ipxe\"\r\n"
+		   "\r\n"
+		   "IyFpcHhlCgplY2hvIEhlbGxvIHdvcmxkCnNoZWxsCg==\r\n" ),
+	TEXTFILE ( "#!ipxe\n"
 		   "\n"
 		   "echo Hello world\n"
 		   "shell\n" ) );
 
 /** Multipart test */
 ARCHIVE_TEST ( multipart, &mime_image_type, "user-data", NULL, "user-data",
-	ARCHIVE ( "Content-Type: multipart/mixed; "
-		      "boundary=\"===============5227682047807177400==\"\r\n"
-		  "MIME-Version: 1.0\r\n"
-		  "\r\n"
-		  "--===============5227682047807177400==\r\n"
-		  "Content-Type: text/cloud-config; charset=\"utf-8\"\r\n"
-		  "MIME-Version: 1.0\r\n"
-		  "Content-Transfer-Encoding: base64\r\n"
-		  "Content-Disposition: attachment; filename=\"conf.yml\"\r\n"
-		  "\r\n"
-		  "LS0tCmNvbmZpZzoKICB0aGluZ3M6CiAgICAtIG9uZQogICAgLSB0d2\r\n"
-		  "8KICBvdGhlcnRoaW5nOiAid29vaG9vIgo=\r\n"
-		  "\r\n"
-		  "--===============5227682047807177400==\r\n"
-		  "Content-Type: text/x-ipxe; charset=\"utf-8\"\r\n"
-		  "MIME-Version: 1.0\r\n"
-		  "Content-Transfer-Encoding: base64\r\n"
-		  "Content-Disposition: attachment; filename=\"hw.ipxe\"\r\n"
-		  "\r\n"
-		  "IyFpcHhlCgplY2hvIEhlbGxvIHdvcmxkCnNoZWxsCg==\r\n"
-		  "\r\n"
-		  "--===============5227682047807177400==--\r\n" ),
-	EXPECTED ( "Content-Type: text/x-ipxe; charset=\"utf-8\"\r\n"
+	TEXTFILE ( "Content-Type: multipart/mixed; "
+		       "boundary=\"===============5227682047807177400==\"\r\n"
+		   "MIME-Version: 1.0\r\n"
+		   "\r\n"
+		   "--===============5227682047807177400==\r\n"
+		   "Content-Type: text/cloud-config; charset=\"utf-8\"\r\n"
+		   "MIME-Version: 1.0\r\n"
+		   "Content-Transfer-Encoding: base64\r\n"
+		   "Content-Disposition: attachment; filename=\"conf.yml\"\r\n"
+		   "\r\n"
+		   "LS0tCmNvbmZpZzoKICB0aGluZ3M6CiAgICAtIG9uZQogICAgLSB0d2\r\n"
+		   "8KICBvdGhlcnRoaW5nOiAid29vaG9vIgo=\r\n"
+		   "\r\n"
+		   "--===============5227682047807177400==\r\n"
+		   "Content-Type: text/x-ipxe; charset=\"utf-8\"\r\n"
+		   "MIME-Version: 1.0\r\n"
+		   "Content-Transfer-Encoding: base64\r\n"
+		   "Content-Disposition: attachment; filename=\"hw.ipxe\"\r\n"
+		   "\r\n"
+		   "IyFpcHhlCgplY2hvIEhlbGxvIHdvcmxkCnNoZWxsCg==\r\n"
+		   "\r\n"
+		   "--===============5227682047807177400==--\r\n" ),
+	TEXTFILE ( "Content-Type: text/x-ipxe; charset=\"utf-8\"\r\n"
 		   "MIME-Version: 1.0\r\n"
 		   "Content-Transfer-Encoding: base64\r\n"
 		   "Content-Disposition: attachment; filename=\"hw.ipxe\"\r\n"
 		   "\r\n"
 		   "IyFpcHhlCgplY2hvIEhlbGxvIHdvcmxkCnNoZWxsCg==\r\n"
 		   "\r\n" ) );
+
+/** No explicit encoding */
+ARCHIVE_TEST ( no_encoding, &mime_image_type, "noenc.mime", NULL, "noenc",
+	TEXTFILE ( "Content-Type: text/x-ipxe; charset=\"utf-8\"\r\n"
+		   "MIME-Version: 1.0\r\n"
+		   "\r\n"
+		   "#!ipxe\r\n"
+		   "echo Default encoding\r\n" ),
+	TEXTFILE ( "#!ipxe\r\n"
+		   "echo Default encoding\r\n" ) );
 
 /**
  * Perform mime self-test
@@ -89,6 +99,7 @@ static void mime_test_exec ( void ) {
 
 	archive_ok ( &hello_world );
 	archive_ok ( &multipart );
+	archive_ok ( &no_encoding );
 }
 
 /** MIME self-test */
