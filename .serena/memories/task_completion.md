@@ -20,5 +20,6 @@
 Nessun test automatico né linter. Verifica solo via boot reale.
 
 ## Aggiornamento documentazione/memorie
+Dopo un merge upstream: ricontrollare anche il version check di netboot.xyz (`mem:tool_netboot_xyz`).
 Aggiornare `SETUP.md` per nuovi tool/procedure. Per la voce archiso vedi
 `mem:tool_archiso_local`. nas.efi è full-driver (NON snponly), USB_KEYBOARD attivo.

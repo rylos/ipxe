@@ -37,6 +37,8 @@ Client UEFI → DHCP (router OpenWrt) → TFTP nas.efi (router) → HTTP immagin
 | System Tools | System Rescue CD, Hiren's, Strelec 10/11, MiniTool, EasyUEFI |
 | Network Boot | Arch ISO local (archiso da NAS), netboot.xyz |
 
+Vedi `mem:tool_netboot_xyz` per il version check di netboot.xyz (`set version 3.x`).
+
 Timeout: 30s, default: Clonezilla. Vedi `mem:tool_archiso_local` per la voce archiso.
 
 ## Clonezilla: due voci, standard e jumbo (2026-08-03)
@@ -93,3 +95,10 @@ Il `||` finale e' essenziale ed e' best-effort per DUE motivi:
 Richiede `CONSOLE_FRAMEBUFFER`, gia' attivo in `config/console.h`.
 
 Se in futuro si aggiungono voci: a 48 righe c'e' margine per ~25 in piu'.
+
+## Merge upstream 2026-09-24: AGENTS.md -> FORK.md
+Upstream (0f4a37bc3) ha aggiunto AGENTS.md, CLAUDE.md e .claude/skills/ipxe-security-review.
+Le istruzioni del fork sono state spostate in `FORK.md`; `AGENTS.md` resta quello upstream
+con una sola riga in cima che rimanda a FORK.md (per ridurre i conflitti nei merge futuri).
+Nei merge futuri: se AGENTS.md va in conflitto, prendere la versione upstream e rimettere la riga.
+Remote `upstream` = https://github.com/ipxe/ipxe.git.
