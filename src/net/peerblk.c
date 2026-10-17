@@ -108,17 +108,33 @@ FILE_SECBOOT ( PERMITTED );
 static struct profiler peerblk_download_profiler __profiler =
 	{ .name = "peerblk.download" };
 
-/** PeerDist block download attempt success profiler */
-static struct profiler peerblk_attempt_success_profiler __profiler =
-	{ .name = "peerblk.attempt.success" };
+/** PeerDist block raw origin server download success profiler */
+static struct profiler peerblk_origin_success_profiler __profiler =
+	{ .name = "peerblk.origin.success" };
 
-/** PeerDist block download attempt failure profiler */
-static struct profiler peerblk_attempt_failure_profiler __profiler =
-	{ .name = "peerblk.attempt.failure" };
+/** PeerDist block raw origin server download failure profiler */
+static struct profiler peerblk_origin_failure_profiler __profiler =
+	{ .name = "peerblk.origin.failure" };
+
+/** PeerDist block retrieval protocol download success profiler */
+static struct profiler peerblk_peer_success_profiler __profiler =
+	{ .name = "peerblk.peer.success" };
+
+/** PeerDist block retrieval protocol download failure profiler */
+static struct profiler peerblk_peer_failure_profiler __profiler =
+	{ .name = "peerblk.peer.failure" };
+
+/** PeerDist block local cache download success profiler */
+static struct profiler peerblk_cache_success_profiler __profiler =
+	{ .name = "peerblk.cache.success" };
+
+/** PeerDist block local cache download failure profiler */
+static struct profiler peerblk_cache_failure_profiler __profiler =
+	{ .name = "peerblk.cache.failure" };
 
 /** PeerDist block download attempt timeout profiler */
-static struct profiler peerblk_attempt_timeout_profiler __profiler =
-	{ .name = "peerblk.attempt.timeout" };
+static struct profiler peerblk_timeout_profiler __profiler =
+	{ .name = "peerblk.timeout" };
 
 /** PeerDist block download discovery success profiler */
 static struct profiler peerblk_discovery_success_profiler __profiler =
@@ -300,8 +316,28 @@ static void peerblk_done ( struct peerdist_block *peerblk, int rc ) {
 	struct peerdisc_segment *segment = peerblk->discovery.segment;
 	struct peerdisc_peer *head;
 	struct peerdisc_peer *peer;
+	struct profiler *success;
+	struct profiler *failure;
 	uint8_t hash[digest->digestsize];
 	unsigned long now = peerblk_timestamp();
+
+	/* Identify peer (if any) and profilers */
+	head = list_entry ( &segment->peers, struct peerdisc_peer, list );
+	peer = ( ( peerblk->peer == head ) ? NULL : peerblk->peer );
+	if ( peer && ( peer->retrieval == &peerdist_post ) ) {
+		/* Retrieval protocol via POST: probably a real peer */
+		success = &peerblk_peer_success_profiler;
+		failure = &peerblk_peer_failure_profiler;
+	} else if ( peer && ( peer->retrieval == &peerdist_get ) ) {
+		/* Retrieval protocol but not POST: probably local cache */
+		success = &peerblk_cache_success_profiler;
+		failure = &peerblk_cache_failure_profiler;
+	} else {
+		/* No peer: origin server range request */
+		assert ( ! peer );
+		success = &peerblk_origin_success_profiler;
+		failure = &peerblk_origin_failure_profiler;
+	}
 
 	/* Check for errors on completion */
 	if ( rc != 0 ) {
@@ -323,12 +359,9 @@ static void peerblk_done ( struct peerdist_block *peerblk, int rc ) {
 	}
 
 	/* Profile successful attempt */
-	profile_custom ( &peerblk_attempt_success_profiler,
-			 ( now - peerblk->attempted ) );
+	profile_custom ( success, ( now - peerblk->attempted ) );
 
 	/* Report peer statistics */
-	head = list_entry ( &segment->peers, struct peerdisc_peer, list );
-	peer = ( ( peerblk->peer == head ) ? NULL : peerblk->peer );
 	peerdisc_stat ( &peerblk->xfer, peer, &segment->peers );
 
 	/* Close download */
@@ -337,8 +370,7 @@ static void peerblk_done ( struct peerdist_block *peerblk, int rc ) {
 
  err:
 	/* Record failure reason and schedule a retry attempt */
-	profile_custom ( &peerblk_attempt_failure_profiler,
-			 ( now - peerblk->attempted ) );
+	profile_custom ( failure, ( now - peerblk->attempted ) );
 	peerblk_reset ( peerblk, rc );
 	peerblk->rc = rc;
 	start_timer_nodelay ( &peerblk->timer );
@@ -1263,7 +1295,7 @@ static void peerblk_expired ( struct retry_timer *timer, int over __unused ) {
 
 	/* Profile download timeout, if applicable */
 	if ( ( peerblk->peer != NULL ) && ( timer->timeout != 0 ) ) {
-		profile_custom ( &peerblk_attempt_timeout_profiler,
+		profile_custom ( &peerblk_timeout_profiler,
 				 ( now - peerblk->attempted ) );
 		DBGC ( peerblk, "PEERBLK %p %d.%d timed out after %ld ticks\n",
 		       peerblk, peerblk->segment, peerblk->block,

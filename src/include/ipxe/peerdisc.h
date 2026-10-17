@@ -31,13 +31,15 @@ struct peerdisc_socket {
 		struct sockaddr_in sin;
 		struct sockaddr_in6 sin6;
 	} address;
+	/** Most recently discovered peer via this socket (if any) */
+	char *recent;
 };
 
 /** PeerDist discovery socket table */
 #define PEERDISC_SOCKETS __table ( struct peerdisc_socket, "peerdisc_sockets" )
 
 /** Declare a PeerDist discovery socket */
-#define __peerdisc_socket __table_entry ( PEERDISC_SOCKETS, 01 )
+#define __peerdisc_socket( pref ) __table_entry ( PEERDISC_SOCKETS, pref )
 
 /** A PeerDist discovery segment */
 struct peerdisc_segment {
@@ -53,6 +55,10 @@ struct peerdisc_segment {
 	const char *id;
 	/** Message UUID string */
 	const char *uuid;
+	/** Time at which discovery was started */
+	unsigned long started;
+	/** Number of discovery replies received */
+	unsigned int replies;
 	/** List of discovered peers
 	 *
 	 * The list of peers may be appended to during the lifetime of

@@ -38,6 +38,7 @@ FILE_SECBOOT ( PERMITTED );
 #include <ipxe/netdevice.h>
 #include <ipxe/timer.h>
 #include <ipxe/fault.h>
+#include <ipxe/profile.h>
 #include <ipxe/settings.h>
 #include <ipxe/pccrr.h>
 #include <ipxe/pccrd.h>
@@ -52,6 +53,66 @@ FILE_SECBOOT ( PERMITTED );
 /** List of discovery segments */
 static LIST_HEAD ( peerdisc_segments );
 
+/**
+ * Time before initial discovery attempt
+ *
+ * In theory, a PeerDist client should perform discovery for each
+ * segment, and then attempt retrieval from any discovered peers.
+ *
+ * In practice, the segment sizes chosen by the origin server are much
+ * too small for this theoretically correct approach to be viable.
+ * With the typically observed PeerDist v2 segment size of around
+ * 64kB, the total time to retrieve a segment from a peer on a gigabit
+ * LAN is around 0.6ms.  This is almost two orders of magnitude less
+ * than the average peer discovery response delay of ~30ms recommended
+ * by the MS-PCCRD specification.  This peer discovery response delay
+ * becomes the dominant limiting factor in the overall download speed.
+ *
+ * If a peer is already known to have one segment of a file, then
+ * there is an extremely high probability that it will have other
+ * segments of the same file.  We therefore optimistically attempt to
+ * retrieve a new segment from whichever peer happens to have most
+ * recently responded to a discovery request for any other segment,
+ * while simultaneously sending out a discovery request for the new
+ * segment.  This allows the overall download to progress without
+ * being limited by the peer discovery response delay.
+ *
+ * This introduces a new problem: we end up sending out a large volume
+ * of discovery requests that will end up being ignored because the
+ * segment has already been fully retrieved before any peer sends a
+ * discovery response.  Each discovery attempt generates around 1-10
+ * network packets (depending on the number of peers): this would be
+ * negligible for sensibly sized segments of around 2MB but represents
+ * an increase in traffic of up to 25% for the absurdly small 64kB
+ * segments typically observed from a PeerDist v2 server.
+ *
+ * Discovery requests are multicast XML documents, and impose a
+ * non-negligible processing burden on each listening peer.  With a
+ * 64kB segment size, the amount of processing required to parse and
+ * respond to a discovery request vastly exceeds the amount of
+ * processing required to just send the segment via the retrieval
+ * protocol.
+ *
+ * We therefore attempt to elide the sending of almost all discovery
+ * requests, by adding a delay before sending the initial discovery
+ * request for each new segment.
+ *
+ * When discovery is redundant (i.e. when we will have optimistically
+ * retrieved the whole segment before any discovery responses might
+ * arrive), this initial delay is long enough to allow the pending
+ * discovery request to be cancelled before it is ever sent.
+ *
+ * When discovery is genuinely valuable (i.e. when our optimistic
+ * assumption that the most recently discovered peer also has the new
+ * segment turns out to be incorrect), this initial delay still allows
+ * plenty of time for discovery to take place before we time out and
+ * attempt an origin server request.
+ */
+#define PEERDISC_INITIAL_TIMEOUT ( 40 * TICKS_PER_MS )
+
+/** Maximum random jitter added to discovery attempt times */
+#define PEERDISC_MAX_JITTER ( 32 * TICKS_PER_MS )
+
 /** Number of repeated discovery attempts */
 #define PEERDISC_REPEAT_COUNT 2
 
@@ -61,7 +122,8 @@ static LIST_HEAD ( peerdisc_segments );
 /** Default discovery timeout (in seconds) */
 #define PEERDISC_DEFAULT_TIMEOUT_SECS 2
 
-/** Recommended discovery timeout (in seconds)
+/**
+ * Recommended discovery timeout (in seconds)
  *
  * We reduce the recommended discovery timeout whenever a segment
  * fails to discover any peers, and restore the default value whenever
@@ -75,9 +137,6 @@ static LIST_HEAD ( peerdisc_segments );
  */
 unsigned int peerdisc_timeout_secs = PEERDISC_DEFAULT_TIMEOUT_SECS;
 
-/** Most recently discovered peer (for any block) */
-static char *peerdisc_recent;
-
 /** Hosted cache server */
 static char *peerhost;
 
@@ -86,6 +145,7 @@ static char *peerpath;
 
 static struct peerdisc_segment * peerdisc_find ( const char *id );
 static int peerdisc_discovered ( struct peerdisc_segment *segment,
+				 struct peerdisc_socket *socket,
 				 struct peerdist_retrieval *retrieval,
 				 const char *location );
 
@@ -95,6 +155,33 @@ static int peerdisc_discovered ( struct peerdisc_segment *segment,
  *
  ******************************************************************************
  */
+
+/** PeerDist discovery attempt profiler */
+static struct profiler peerdisc_attempt_profiler __profiler =
+	{ .name = "peerdisc.attempt" };
+
+/** PeerDist discovery first reply profiler */
+static struct profiler peerdisc_reply_profiler __profiler =
+	{ .name = "peerdisc.reply" };
+
+/** PeerDist discovery elision profiler */
+static struct profiler peerdisc_elided_profiler __profiler =
+	{ .name = "peerdisc.elided" };
+
+/**
+ * Get profiling timestamp
+ *
+ * @ret timestamp	Timestamp
+ */
+static inline __attribute__ (( always_inline )) unsigned long
+peerdisc_timestamp ( void ) {
+
+	if ( PROFILING ) {
+		return currticks();
+	} else {
+		return 0;
+	}
+}
 
 /**
  * Report peer discovery statistics
@@ -275,11 +362,8 @@ static int peerdisc_socket_rx ( struct peerdisc_socket *socket,
 		      location += ( strlen ( location ) + 1 /* NUL */ ) ) {
 
 			/* Report discovered peer location */
-			if ( ( rc = peerdisc_discovered ( segment,
-							  &peerdist_post,
-							  location ) ) != 0 ) {
-				goto err;
-			}
+			peerdisc_discovered ( segment, socket, &peerdist_post,
+					      location );
 		}
 	}
 
@@ -297,8 +381,11 @@ static void peerdisc_socket_close ( int rc ) {
 	struct peerdisc_socket *socket;
 
 	/* Close all sockets */
-	for_each_table_entry ( socket, PEERDISC_SOCKETS )
+	for_each_table_entry ( socket, PEERDISC_SOCKETS ) {
 		intf_restart ( &socket->xfer, rc );
+		free ( socket->recent );
+		socket->recent = NULL;
+	}
 }
 
 /** PeerDist discovery socket interface operations */
@@ -311,7 +398,7 @@ static struct interface_descriptor peerdisc_socket_desc =
 	INTF_DESC ( struct peerdisc_socket, xfer, peerdisc_socket_operations );
 
 /** PeerDist discovery IPv4 socket */
-struct peerdisc_socket peerdisc_socket_ipv4 __peerdisc_socket = {
+struct peerdisc_socket peerdisc_socket_ipv4 __peerdisc_socket ( 01 ) = {
 	.name = "IPv4",
 	.address = {
 		.sin = {
@@ -324,7 +411,7 @@ struct peerdisc_socket peerdisc_socket_ipv4 __peerdisc_socket = {
 };
 
 /** PeerDist discovery IPv6 socket */
-struct peerdisc_socket peerdisc_socket_ipv6 __peerdisc_socket = {
+struct peerdisc_socket peerdisc_socket_ipv6 __peerdisc_socket ( 02 ) = {
 	.name = "IPv6",
 	.address = {
 		.sin6 = {
@@ -386,17 +473,30 @@ static struct peerdisc_segment * peerdisc_find ( const char *id ) {
  * Add discovered PeerDist peer
  *
  * @v segment		PeerDist discovery segment
+ * @v socket		PeerDist discovery socket (or NULL)
  * @v retrieval		PeerDist retrieval protocol
  * @v location		Peer location
  * @ret rc		Return status code
  */
 static int peerdisc_discovered ( struct peerdisc_segment *segment,
+				 struct peerdisc_socket *socket,
 				 struct peerdist_retrieval *retrieval,
 				 const char *location ) {
+	unsigned long now = peerdisc_timestamp();
 	struct peerdisc_peer *peer;
 	struct peerdisc_client *peerdisc;
 	struct peerdisc_client *tmp;
 	char *recent;
+
+	/* Profile time to first reply */
+	if ( socket && ( ! segment->replies ) ) {
+		profile_custom ( &peerdisc_reply_profiler,
+				 ( now - segment->started ) );
+	}
+
+	/* Record number of replies received */
+	if ( socket )
+		segment->replies++;
 
 	/* Ignore duplicate peers */
 	list_for_each_entry ( peer, &segment->peers, list ) {
@@ -406,7 +506,10 @@ static int peerdisc_discovered ( struct peerdisc_segment *segment,
 			return 0;
 		}
 	}
-	DBGC2 ( segment, "PEERDISC %p discovered %s\n", segment, location );
+	if ( socket ) {
+		DBGC2 ( segment, "PEERDISC %p discovered %s\n",
+			segment, location );
+	}
 
 	/* Allocate and initialise structure */
 	peer = zalloc ( sizeof ( *peer ) + strlen ( location ) + 1 /* NUL */ );
@@ -419,13 +522,11 @@ static int peerdisc_discovered ( struct peerdisc_segment *segment,
 	list_add_tail ( &peer->list, &segment->peers );
 
 	/* Record as most recently discovered peer, if applicable */
-	if ( ( location != peerdisc_recent ) &&
-	     ( location != peerhost ) &&
-	     ( location != peerpath ) ) {
+	if ( socket ) {
 		recent = strdup ( location );
 		if ( recent ) {
-			free ( peerdisc_recent );
-			peerdisc_recent = recent;
+			free ( socket->recent );
+			socket->recent = recent;
 		}
 	}
 
@@ -434,6 +535,22 @@ static int peerdisc_discovered ( struct peerdisc_segment *segment,
 		peerdisc->op->discovered ( peerdisc );
 
 	return 0;
+}
+
+/**
+ * Schedule discovery attempt
+ *
+ * @v segment		PeerDist discovery segment
+ * @v timeout		Minimum timeout
+ */
+static void peerdisc_schedule ( struct peerdisc_segment *segment,
+				unsigned long timeout ) {
+
+	/* Add some random jitter */
+	timeout += ( random() % PEERDISC_MAX_JITTER );
+
+	/* Schedule next transmission */
+	start_timer_fixed ( &segment->timer, timeout );
 }
 
 /**
@@ -447,11 +564,13 @@ static void peerdisc_expired ( struct retry_timer *timer, int over __unused ) {
 		container_of ( timer, struct peerdisc_segment, timer );
 
 	/* Attempt to transmit discovery requests */
+	DBGC2 ( segment, "PEERDISC %p discovering %s\n",
+		segment, segment->id );
 	peerdisc_socket_tx ( segment->uuid, segment->id );
 
-	/* Schedule next transmission, if applicable */
+	/* Schedule next discovery attempt, if applicable */
 	if ( timer->count < PEERDISC_REPEAT_COUNT )
-		start_timer_fixed ( &segment->timer, PEERDISC_REPEAT_TIMEOUT );
+		peerdisc_schedule ( segment, PEERDISC_REPEAT_TIMEOUT );
 }
 
 /**
@@ -462,6 +581,7 @@ static void peerdisc_expired ( struct retry_timer *timer, int over __unused ) {
  */
 static struct peerdisc_segment * peerdisc_create ( const char *id ) {
 	struct peerdisc_segment *segment;
+	struct peerdisc_socket *socket;
 	union {
 		union uuid uuid;
 		uint32_t dword[ sizeof ( union uuid ) / sizeof ( uint32_t ) ];
@@ -497,19 +617,21 @@ static struct peerdisc_segment * peerdisc_create ( const char *id ) {
 	ref_init ( &segment->refcnt, peerdisc_free );
 	segment->id = id_copy;
 	segment->uuid = uuid_copy;
+	segment->started = peerdisc_timestamp();
 	INIT_LIST_HEAD ( &segment->peers );
 	INIT_LIST_HEAD ( &segment->clients );
 	timer_init ( &segment->timer, peerdisc_expired, &segment->refcnt );
 
 	/* Add local cache directory, if any */
 	if ( peerpath )
-		peerdisc_discovered ( segment, &peerdist_get, peerpath );
+		peerdisc_discovered ( segment, NULL, &peerdist_get, peerpath );
 
 	/* Add hosted cache server or initiate discovery */
 	if ( peerhost ) {
 
 		/* Add hosted cache server to list of peers */
-		if ( ( rc = peerdisc_discovered ( segment, &peerdist_post,
+		if ( ( rc = peerdisc_discovered ( segment, NULL,
+						  &peerdist_post,
 						  peerhost ) ) != 0 ) {
 			goto err_peerhost;
 		}
@@ -522,16 +644,24 @@ static struct peerdisc_segment * peerdisc_create ( const char *id ) {
 		 * the most recently discovered peer for any block has
 		 * a high probability of also having a copy of the
 		 * next block that we attempt to discover.
+		 *
+		 * Experiments show that Windows peers will randomly
+		 * and erroneously report blocks as being not present
+		 * when a retrieval protocol request is made using
+		 * IPv6.  We therefore choose to prefer peers that
+		 * were discovered via IPv4, since this substantially
+		 * improves the overall reliability.
 		 */
-		if ( peerdisc_recent ) {
-			peerdisc_discovered ( segment, &peerdist_post,
-					      peerdisc_recent );
+		for_each_table_entry ( socket, PEERDISC_SOCKETS ) {
+			if ( socket->recent ) {
+				peerdisc_discovered ( segment, NULL,
+						      &peerdist_post,
+						      socket->recent );
+			}
 		}
 
-		/* Start discovery timer */
-		start_timer_nodelay ( &segment->timer );
-		DBGC2 ( segment, "PEERDISC %p discovering %s\n",
-			segment, segment->id );
+		/* Schedule initial discovery attempt */
+		peerdisc_schedule ( segment, PEERDISC_INITIAL_TIMEOUT );
 	}
 
 	/* Add to list of segments, transfer reference to list, and return */
@@ -617,15 +747,28 @@ int peerdisc_open ( struct peerdisc_client *peerdisc, const void *id,
  */
 void peerdisc_close ( struct peerdisc_client *peerdisc ) {
 	struct peerdisc_segment *segment = peerdisc->segment;
+	unsigned long now = peerdisc_timestamp();
 
 	/* Ignore if discovery is already closed */
 	if ( ! segment )
 		return;
 
-	/* If no peers were discovered, reduce the recommended
-	 * discovery timeout to minimise delays on future requests.
+	/* Profile overall discovery attempt */
+	profile_custom ( &peerdisc_attempt_profiler,
+			 ( now - segment->started ) );
+
+	/* Profile elided discovery attempts */
+	if ( ! segment->timer.count ) {
+		profile_custom ( &peerdisc_elided_profiler,
+				 ( now - segment->started ) );
+	}
+
+	/* If discoveries were sent but no replies were received,
+	 * reduce the recommended discovery timeout to minimise delays
+	 * on future requests.
 	 */
-	if ( list_empty ( &segment->peers ) && peerdisc_timeout_secs ) {
+	if ( ( segment->timer.count > 0 ) && ( segment->replies == 0 ) &&
+	     ( peerdisc_timeout_secs > 0 ) ) {
 		peerdisc_timeout_secs--;
 		DBGC ( segment, "PEERDISC %p reducing timeout to %d "
 		       "seconds\n", peerdisc, peerdisc_timeout_secs );
